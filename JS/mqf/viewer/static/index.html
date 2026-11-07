@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Més que un Frame · Viewer</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.75" y="5.75" width="18.5" height="12.5" rx="2.5"/><circle cx="16.5" cy="14" r="2.1"/></svg>
+    <span class="wordmark">Més que un Frame</span>
+    <span class="crumb-sep" aria-hidden="true">/</span>
+    <h1 id="title">Loading match</h1>
+    <span class="game-key" id="gameKey"></span>
+  </div>
+  <div class="seg" role="tablist" aria-label="View" id="viewSeg">
+    <button role="tab" data-view="tactical" aria-selected="true">Tactical</button>
+    <button role="tab" data-view="broadcast" aria-selected="false">Broadcast</button>
+    <button role="tab" data-view="pitch" aria-selected="false">Pitch</button>
+  </div>
+  <div class="top-actions">
+    <label class="toggle"><input type="checkbox" id="optOverlay" checked><span class="track" aria-hidden="true"></span>Tracking on video</label>
+    <label class="toggle"><input type="checkbox" id="optTrails" checked><span class="track" aria-hidden="true"></span>Trails</label>
+    <button class="ghost icon-only" id="helpBtn" aria-label="Keyboard shortcuts" aria-expanded="false">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="3.75" width="12.5" height="8.5" rx="1.5"/><path d="M4.5 6.5h1M7.5 6.5h1M10.5 6.5h1M5 9.5h6"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="workspace">
+  <section class="stage-col" aria-label="Match">
+    <div class="stage" id="stage">
+      <video id="vid-tactical" class="vid" muted playsinline preload="auto"></video>
+      <video id="vid-broadcast" class="vid" muted playsinline preload="auto"></video>
+      <canvas id="overlay" class="overlay"></canvas>
+      <canvas id="pitch" class="pitch-canvas"></canvas>
+      <div class="stage-chip" id="stageChip" hidden></div>
+      <div class="stage-msg" id="stageMsg" hidden>
+        <p id="stageMsgText"></p>
+        <button class="ghost small" id="stageMsgBtn" hidden>Show the pitch</button>
+      </div>
+      <div class="loading" id="loading">
+        <p id="loadingText">Loading tracking</p>
+        <div class="bar"><div id="loadingBar"></div></div>
+      </div>
+    </div>
+    <div class="transport" role="toolbar" aria-label="Playback">
+      <button class="primary" id="playBtn" aria-label="Play (Space)">
+        <svg viewBox="0 0 16 16" aria-hidden="true" class="i-play"><path d="M5 3.5v9l7-4.5z"/></svg>
+        <svg viewBox="0 0 16 16" aria-hidden="true" class="i-pause"><path d="M5 3.5v9M11 3.5v9"/></svg>
+        <span id="playLabel">Play</span>
+      </button>
+      <div class="steps">
+        <button class="ghost icon-only" data-step="-25" aria-label="Back 1 second (Shift+Left)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 4 4 8l4 4M12.5 4l-4 4 4 4"/></svg></button>
+        <button class="ghost icon-only" data-step="-1" aria-label="Back 1 frame (Left)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4 6 8l4 4"/></svg></button>
+        <button class="ghost icon-only" data-step="1" aria-label="Forward 1 frame (Right)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6 4 4 4-4 4"/></svg></button>
+        <button class="ghost icon-only" data-step="25" aria-label="Forward 1 second (Shift+Right)"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 4 4 4-4 4M3.5 4l4 4-4 4"/></svg></button>
+      </div>
+      <div class="readout">
+        <span class="num" id="frameReadout">0</span>
+        <span class="muted" id="clockReadout">—</span>
+      </div>
+      <div class="seg small" role="group" aria-label="Speed" id="speedSeg">
+        <button data-rate="0.25">¼×</button><button data-rate="0.5">½×</button><button data-rate="1" aria-pressed="true">1×</button><button data-rate="2">2×</button><button data-rate="4">4×</button>
+      </div>
+    </div>
+  </section>
+
+  <aside class="rail" id="rail" aria-label="This frame">
+    <section class="block">
+      <h2 class="label">Labels here</h2>
+      <ul class="here" id="hereList"></ul>
+    </section>
+    <section class="block">
+      <h2 class="label">Tracking here</h2>
+      <dl class="kv">
+        <div><dt>Ball</dt><dd id="trkBall">—</dd></div>
+        <div><dt id="trkHomeName">Home players</dt><dd class="num" id="trkHome">—</dd></div>
+        <div><dt id="trkAwayName">Away players</dt><dd class="num" id="trkAway">—</dd></div>
+      </dl>
+    </section>
+    <section class="block" id="syncBlock" hidden>
+      <h2 class="label">Broadcast sync</h2>
+      <div class="nudge-row">
+        <p class="num" id="railVideo"></p>
+        <div class="nudge" role="group" aria-label="Nudge the broadcast against the match">
+          <button class="ghost small" data-nudge="-25" aria-label="Broadcast 1 second earlier">−1 s</button>
+          <button class="ghost small" data-nudge="-1" aria-label="Broadcast 1 frame earlier">−1 f</button>
+          <span class="num" id="nudgeVal" title="Double-click to reset">±0 f</span>
+          <button class="ghost small" data-nudge="1" aria-label="Broadcast 1 frame later">+1 f</button>
+          <button class="ghost small" data-nudge="25" aria-label="Broadcast 1 second later">+1 s</button>
+        </div>
+      </div>
+    </section>
+    <section class="block grow">
+      <div class="block-head">
+        <h2 class="label">Disagreements</h2>
+        <div class="seg small" role="group" aria-label="Filter disagreements" id="diffSeg">
+          <button data-min="0" aria-pressed="true">All</button><button data-min="25">≥ 1 s</button>
+        </div>
+      </div>
+      <p class="muted small" id="diffSummary"></p>
+      <ol class="diffs" id="diffList"></ol>
+    </section>
+  </aside>
+
+  <section class="timeline" aria-label="Possession timeline">
+    <div class="tl-head">
+      <h2>Possession</h2>
+      <ul class="legend" id="legend"></ul>
+      <div class="tl-actions">
+        <div class="seg small" role="group" aria-label="Lens width" id="lensSeg">
+          <button data-lens="10">10 s</button><button data-lens="30" aria-pressed="true">30 s</button><button data-lens="120">2 min</button><button data-lens="600">10 min</button>
+        </div>
+        <label class="ghost small file-btn">Add lane<input type="file" id="addLane" accept=".csv,text/csv" hidden></label>
+      </div>
+    </div>
+    <div class="tl-grid">
+      <div class="tl-labels" id="tlLabels"></div>
+      <div class="tl-canvases">
+        <canvas id="overview" class="overview" aria-label="Whole match: click to jump"></canvas>
+        <canvas id="lens" class="lens" aria-label="Around the playhead: drag to scrub"></canvas>
+      </div>
+    </div>
+    <p class="tl-empty muted" id="tlEmpty" hidden></p>
+  </section>
+</main>
+
+<div class="tooltip" id="tooltip" role="status" hidden></div>
+<div class="popover" id="help" hidden>
+  <h2>Keyboard</h2>
+  <dl>
+    <div><dt>Space</dt><dd>Play / pause</dd></div>
+    <div><dt>← →</dt><dd>One frame</dd></div>
+    <div><dt>Shift + ← →</dt><dd>One second</dd></div>
+    <div><dt>J L</dt><dd>Five seconds</dd></div>
+    <div><dt>[ ]</dt><dd>Previous / next ground-truth change</dd></div>
+    <div><dt>, .</dt><dd>Previous / next disagreement</dd></div>
+    <div><dt>1 2 3</dt><dd>Tactical, broadcast, pitch</dd></div>
+    <div><dt>O</dt><dd>Tracking on video</dd></div>
+    <div><dt>+ −</dt><dd>Lens width</dd></div>
+  </dl>
+  <p class="muted small">Drop a frame,label CSV anywhere to add a lane.</p>
+</div>
+<div class="drop" id="drop" hidden><p>Drop a frame,label CSV to add it as a lane</p></div>
+<script src="/app.js"></script>
+</body>
+</html>
