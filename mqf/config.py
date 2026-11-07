@@ -1,8 +1,9 @@
 """Paths and per-game constants.
 
-The official challenge repo is cloned (pinned) into vendor/mtah2027 by `python bootstrap.py`.
-Everything about the real match comes from its games.py, and validation/scoring from its
-evaluation/ scripts -- we never copy their numbers or reimplement their metric.
+The official challenge files (games.py, evaluation/) live at the root of this repo, which is a
+fork of the official one; MTAH_OFFICIAL_DIR or a vendor/mtah2027 clone override that. Everything
+about the real match comes from its games.py, and validation/scoring from its evaluation/
+scripts -- we never copy their numbers or reimplement their metric.
 """
 from __future__ import annotations
 
@@ -12,7 +13,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OFFICIAL_DIR = Path(os.environ.get("MTAH_OFFICIAL_DIR", ROOT / "vendor" / "mtah2027"))
+
+
+def _official_dir() -> Path:
+    """MTAH_OFFICIAL_DIR, else a vendor/ clone, else the repo root (this repo is a fork)."""
+    if "MTAH_OFFICIAL_DIR" in os.environ:
+        return Path(os.environ["MTAH_OFFICIAL_DIR"])
+    vendor = ROOT / "vendor" / "mtah2027"
+    return vendor if (vendor / "games.py").exists() else ROOT
+
+
+OFFICIAL_DIR = _official_dir()
 DATA_DIR = Path(os.environ.get("MTAH_DATA_DIR", ROOT / "data"))          # gated match bundle
 CACHE_DIR = Path(os.environ.get("MQF_CACHE_DIR", ROOT / "cache"))         # arrays derived from it
 RESULTS_DIR = ROOT / "results"                                            # our real-match submissions
@@ -30,7 +41,8 @@ H, A, D = 0, 1, 2
 def official():
     """Import the official games.py and possession_metrics.py from vendor/."""
     if not (OFFICIAL_DIR / "games.py").exists():
-        raise SystemExit(f"Official repo not found at {OFFICIAL_DIR}. Run:  python bootstrap.py")
+        raise SystemExit(f"Official games.py not found at {OFFICIAL_DIR}. "
+                         "Set MTAH_OFFICIAL_DIR to a clone of the official repo.")
     for p in (OFFICIAL_DIR, OFFICIAL_DIR / "evaluation"):
         if str(p) not in sys.path:
             sys.path.insert(0, str(p))

@@ -1,10 +1,9 @@
-# Everything the evaluation needs. Deliberately two lines.
+# Everything the evaluation and our pipeline (mqf/) need.
 #
-# The scorer is dependency-light on purpose: no sklearn, no torch, nothing that pins a Python
-# version. It runs under 3.8 and 3.11 alike and produces identical output, so "it scored
-# differently on my machine" is not a conversation anyone has to have.
-#
-# Optional tooling -- the ATD loader and anything that opens the video -- lives in
-# requirements-starter.txt.
-numpy
-pandas
+# Pinned so the submission regenerates byte-identically (RULES.md; CLAUDE.md rule 6). The official
+# scorer is dependency-light and runs on any numpy/pandas; the pins are for mqf/. Bump them
+# deliberately and re-run `python -m mqf.make_submission --reproduce` after any change.
+numpy==2.5.4
+pandas==3.1.1
+python-dateutil==4.0.0
+tzdata==2026.6

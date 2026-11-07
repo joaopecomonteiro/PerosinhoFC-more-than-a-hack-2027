@@ -36,6 +36,26 @@ data/*
 *.gzip
 *.pl3container
 
+# -- Perosinho FC: anything derived from the match data -----------------------------------------
+# CLAUDE.md rule 5: nothing derived from the match data is ever committed. These folders are
+# written by mqf/ on the real match (parsed tracking arrays, our labels for every frame, scorer and
+# profile reports, viewer sync maps), so a stray `git add .` must not be able to pick them up.
+/cache/
+/results/
+/reports/
+# Raw asset patterns, in case a bundle file is unpacked outside data/.
+*_atd.xml
+*_atd.txt
+*_homography.csv
+*_smart_tagging.xml
+*.npz
+
+# Generated or third-party, not ours to publish: synthetic files are rebuilt on demand by
+# mqf/synthetic.py, and IDSSE is redistributed only under its own licence.
+/synthetic_data/
+/external/
+# harness_results/ (aggregates on other games) is deliberately NOT ignored -- safe to commit.
+
 # -- internal documents ---------------------------------------------------------------------------
 # OVERVIEW.md -- the institutional description of the competition -- IS committed. It is the only
 # place that explains why the format changed from 2026, and a document like that circulating by
