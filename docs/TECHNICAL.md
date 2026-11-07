@@ -52,4 +52,4 @@ pip install -r requirements.txt         # pinned
 python -m mqf.make_submission --team Perosinho_FC   # -> results/Perosinho_FC.csv, validated
 python -m mqf.make_submission --team Perosinho_FC --reproduce   # regenerate + byte-compare
 ```
-Python 3.13, deterministic.
+Python 3.14, deterministic.
