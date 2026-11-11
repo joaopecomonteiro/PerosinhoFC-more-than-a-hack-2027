@@ -1,0 +1,7 @@
+# IDSSE through floodlight. Its own venv: floodlight 1.2.0 needs pandas < 3 and Python < 3.14,
+# while the submission pins pandas 3.0.5.
+#   python -m venv .venv-harness ; .venv-harness\Scripts\Activate.ps1 ; pip install -r requirements-harness.txt
+numpy==2.5.3
+pandas==2.3.3
+floodlight==1.2.0
+pytest==9.1.1

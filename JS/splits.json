@@ -1,0 +1,64 @@
+{
+  "seed": 2027,
+  "unit": "game",
+  "rule": "seeded shuffle within strata, per source",
+  "sources": {
+    "idsse": {
+      "fps": 25,
+      "train_ok": true,
+      "note": "stratified by league: 1 Bundesliga + 1 2. Bundesliga game held out",
+      "train": [
+        "IDSSE-J03WN1",
+        "IDSSE-J03WOH",
+        "IDSSE-J03WOY",
+        "IDSSE-J03WPY",
+        "IDSSE-J03WR9"
+      ],
+      "val": [
+        "IDSSE-J03WMX",
+        "IDSSE-J03WQQ"
+      ]
+    },
+    "metrica": {
+      "fps": 25,
+      "train_ok": true,
+      "note": "1 of 3 held out",
+      "train": [
+        "METRICA-1",
+        "METRICA-2"
+      ],
+      "val": [
+        "METRICA-3"
+      ]
+    },
+    "skillcorner": {
+      "fps": 10,
+      "train_ok": false,
+      "note": "5 of 20 held out; train_ok false: 10 fps, not used for training (Sigmar, 10 Nov 2026)",
+      "train": [
+        "SKC-1874553",
+        "SKC-1925299",
+        "SKC-1927964",
+        "SKC-1953632",
+        "SKC-1959846",
+        "SKC-1996435",
+        "SKC-1996436",
+        "SKC-2006229",
+        "SKC-2006363",
+        "SKC-2007448",
+        "SKC-2007721",
+        "SKC-2010085",
+        "SKC-2013725",
+        "SKC-2015213",
+        "SKC-2017461"
+      ],
+      "val": [
+        "SKC-1886347",
+        "SKC-1899585",
+        "SKC-1986691",
+        "SKC-2011166",
+        "SKC-2016236"
+      ]
+    }
+  }
+}

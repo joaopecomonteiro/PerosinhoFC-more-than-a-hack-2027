@@ -1,0 +1,44 @@
+{
+  "name": "ball_A_off",
+  "tag": "dev",
+  "best_val_ade_m": 30.600479125976562,
+  "config": {
+    "arch": "A",
+    "player_mask": "off",
+    "d": 128,
+    "heads": 4,
+    "layers": 4,
+    "set_layers": 2,
+    "dropout": 0.1,
+    "hz": 6.25,
+    "window_s": 48.0,
+    "a_max": 48,
+    "seed": 0,
+    "train_games": [
+      "IDSSE-J03WN1",
+      "IDSSE-J03WOH",
+      "IDSSE-J03WOY",
+      "IDSSE-J03WPY",
+      "IDSSE-J03WR9",
+      "METRICA-1",
+      "METRICA-2"
+    ],
+    "val_games": [
+      "IDSSE-J03WMX",
+      "IDSSE-J03WQQ",
+      "METRICA-3"
+    ]
+  },
+  "history": [
+    {
+      "epoch": 0,
+      "train_loss": 43.563692798141304,
+      "val_loss": 41.93944549560547,
+      "val_ade_m": 30.600479125976562,
+      "val_ade_le2s": 32.210668167977964,
+      "val_ade_2-8s": 24.624518461005632,
+      "val_ade_gt8s": 30.987294772041402
+    }
+  ],
+  "params": 1241346
+}

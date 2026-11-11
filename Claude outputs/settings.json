@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(/data/**)",
+      "Read(/evaluation/results/**)",
+      "Read(/evaluation/reports/**)",
+      "Read(/evaluation/gt/**)",
+      "Read(/JS/cache/**)",
+      "Read(/JS/results/**)",
+      "Read(/JS/reports/**)",
+      "Read(**/*.mp4)",
+      "Read(**/*_atd.*)",
+      "Read(**/*_homography.csv)",
+      "Read(**/*_smart_tagging.xml)",
+      "Edit(/JS/vendor/**)",
+      "Edit(/data/**)"
+    ]
+  }
+}

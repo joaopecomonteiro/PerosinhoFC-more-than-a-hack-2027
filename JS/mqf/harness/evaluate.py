@@ -16,9 +16,12 @@ from .noise import NoiseConfig, corrupt
 LENGTH_BUCKETS_S = (0, 3, 10, 30, np.inf)
 
 
-def predict(match: dict, params: decode.Params, cfg: NoiseConfig) -> np.ndarray:
+def predict(match: dict, params: decode.Params, cfg: NoiseConfig, clean_tracks: bool = False) -> np.ndarray:
     trk = corrupt(match["players"], match["team_of_player"], match["ball"],
                   match["labels"] != "X", match["fps"], cfg)
+    if clean_tracks:
+        from .. import tracks
+        trk, _ = tracks.clean(trk, match["fps"], match["pitch"])
     feat = features.build(trk, match["pitch"], match["fps"])
     return decode.decode(feat, match["halves"], len(match["labels"]), params, tags=None)
 
@@ -40,14 +43,19 @@ def by_length(pm, gt, pred, fps):
 
 
 def score(gt_labels: np.ndarray, pred_labels: np.ndarray, fps: int) -> dict:
+    """Official metric. spellF1 / macroF1 do not depend on the frame rate; for a game that is not
+    at 25 fps the transition tolerances (~0.5 s, ~1 s) are converted to its frames and durations
+    are reported in real seconds (the official code assumes 25 fps for both)."""
     _, pm = official()
     gt, pred = pm.label_codes(gt_labels), pm.label_codes(pred_labels)
-    r = pm.evaluate(gt, pred)
+    taus = tuple(max(1, int(round(t * fps / pm.FPS))) for t in pm.TAUS)
+    r = pm.evaluate(gt, pred, taus=taus)
+    to_s = pm.FPS / fps
     return {
         "spellF1": r["spell_f1_mean"], "macroF1": r["macro_f1"],
         "n_gt_spells": r["n_gt_spells"], "n_pred_spells": r["n_pred_spells"],
-        "gt_dur_s": r["gt_mean_spell_duration_s"], "pred_dur_s": r["mean_spell_duration_s"],
+        "gt_dur_s": r["gt_mean_spell_duration_s"] * to_s, "pred_dur_s": r["mean_spell_duration_s"] * to_s,
         "alive_dead_f1": r["alive_dead_f1"], "team_acc_both_alive": r["team_acc_both_alive"],
-        "transF1_12": r["transitions"][12]["f1"], "transF1_25": r["transitions"][25]["f1"],
+        "transF1_12": r["transitions"][taus[0]]["f1"], "transF1_25": r["transitions"][taus[1]]["f1"],
         "by_length": by_length(pm, gt, pred, fps),
     }

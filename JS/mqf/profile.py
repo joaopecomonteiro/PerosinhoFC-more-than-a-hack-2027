@@ -2,6 +2,7 @@
 
     python -m mqf.profile                       # both recordings
     python -m mqf.profile --source tactical     # one of them
+    python -m mqf.profile --source tactical --clean   # + the same numbers after mqf.tracks.clean
 
 Prints ONE block of aggregates -- shares, counts, quantiles -- and writes the same numbers to
 reports/profile/profile.json (gitignored). It never prints frame numbers, rows, positions or
@@ -11,7 +12,8 @@ What it answers (docs: "Next steps", section 1):
   ball gaps (how many, how long), where the ball goes missing (players moving vs still -- the
   ceiling for any imputation model), tracking noise (jitter, speed field vs positions, ball
   jumps), tracklets (slots, lengths, objects per frame), stillness (median player speed), off-pitch
-  shares, Smart Tagging coverage, homography validity.
+  shares, Smart Tagging coverage, homography validity; identity: tracks per team (> 11?), jumps
+  faster than a sprinter, new tracks with a lost same-team track nearby (re-linkable), duplicates.
 
 Use the numbers to set RANGES for noise-model robustness sweeps and to design features -- not to
 point-calibrate anything to this match, and never to write rules tied to specific frames.
@@ -35,6 +37,11 @@ STILL_MS = (0.5, 1.0, 1.5)                          # median player speed thresh
 ACTIVE_MS, SLOW_MS = 2.0, 1.0                       # "players moving" / "players still"
 JUMP_MS = 40.0                                      # ball speed no football kick reaches over 1 frame
 OFF_PITCH_M = 0.5
+# identity diagnostics -- football knowledge, NOT fitted to this match (CLAUDE.md, rule 2)
+VMAX_MS = 10.5                                      # elite sprint peak is ~36-38 km/h
+JUMP_TOL_M = 1.0                                    # position error a tracker may add per step
+GATE_M, GATE_MS = 2.0, 8.0                          # a lost player is within 2 m + 8 m/s x gap
+DUP_M = 1.0                                         # two same-team tracks closer than this: one player
 
 
 def runs(mask: np.ndarray) -> np.ndarray:
@@ -171,6 +178,116 @@ def profile_tracking(trk: atd.Tracking, spec: GameSpec, graded: np.ndarray) -> d
     }
 
 
+def _edges(on: np.ndarray):
+    e = np.diff(np.r_[0, on.astype(np.int8), 0])
+    return np.flatnonzero(e == 1), np.flatnonzero(e == -1) - 1          # first / last frame of each run
+
+
+def profile_identity(trk: atd.Tracking, spec: GameSpec, graded: np.ndarray) -> dict:
+    """How badly the tracklets break player identity -- aggregates only.
+
+    Answers: how often a team has more than 11 tracks at once; how often a track jumps faster than
+    a human can run (frame to frame, and across short gaps); and, for every new track, whether a
+    track of the same team ended nearby shortly before (the case where re-linking is easy), several
+    did (ambiguous), or an active same-team track is right next to it (a duplicate, not a new player).
+    """
+    fps, n = spec.fps, trk.n_frames
+    xy = trk.players
+    present = ~np.isnan(xy[..., 0])
+    if not graded.any():
+        graded = present.any(axis=1)
+    home = trk.team_of_slot == 0
+    minutes = graded.sum() / fps / 60
+    out = {"thresholds": {"vmax_ms": VMAX_MS, "jump_tol_m": JUMP_TOL_M, "gate": f"{GATE_M:g} m + {GATE_MS:g} m/s x gap",
+                          "duplicate_m": DUP_M}}
+
+    per_team = {"home": present[:, home].sum(axis=1), "away": present[:, ~home].sum(axis=1)}
+    out["tracked_per_team"] = {k: q(v[graded], (5, 50, 95), 1) for k, v in per_team.items()}
+    out["share_frames_over_11"] = {k: share(v > 11, within=graded) for k, v in per_team.items()}
+
+    # jumps: displacement between consecutive observations of a slot vs what a sprinter can cover
+    j1 = jg = 0
+    sizes = []
+    for k in range(xy.shape[1]):
+        idx = np.flatnonzero(present[:, k])
+        if len(idx) < 2:
+            continue
+        d = np.linalg.norm(np.diff(xy[idx, k], axis=0), axis=1)
+        gap = np.diff(idx)
+        jump = (d > VMAX_MS * gap / fps + JUMP_TOL_M) & (gap <= 2 * fps) & graded[idx[1:]]
+        j1 += int(np.sum(jump & (gap == 1)))
+        jg += int(np.sum(jump & (gap > 1)))
+        sizes.append(d[jump])
+    sizes = np.concatenate(sizes) if sizes else np.zeros(0)
+    out["jumps_per_min"] = {"frame_to_frame": round(j1 / minutes, 2) if minutes else None,
+                            "across_gap_le_2s": round(jg / minutes, 2) if minutes else None}
+    out["jump_size_m"] = q(sizes, (50, 90))
+
+    # births (a track starts) vs deaths (a track ends) of the same team
+    first_graded = {a for _, a, _ in spec.halves} if spec.halves else set()
+    births, deaths = [], []
+    for k in range(xy.shape[1]):
+        s, e = _edges(present[:, k])
+        births += [(t, k) for t in s if graded[t] and t not in first_graded and t > 0]
+        deaths += [(t, k) for t in e if graded[t] and t < n - 1]
+    deaths_by_team = {}
+    for team in (0, 1):
+        d = sorted((t, k) for t, k in deaths if trk.team_of_slot[k] == team)
+        deaths_by_team[team] = (np.array([t for t, _ in d], dtype=np.int64),
+                                np.array([xy[t, k] for t, k in d]).reshape(-1, 2))
+    win = 10 * fps
+    has = {1: 0, 5: 0, 10: 0}
+    ambiguous = dup = 0
+    nearest5 = []
+    for t, k in births:
+        team = trk.team_of_slot[k]
+        p = xy[t, k]
+        others = np.flatnonzero(present[t] & (trk.team_of_slot == team))
+        others = others[others != k]
+        if len(others) and np.min(np.linalg.norm(xy[t, others] - p, axis=1)) < DUP_M:
+            dup += 1
+        td, pd_ = deaths_by_team[team]
+        lo, hi = np.searchsorted(td, t - win), np.searchsorted(td, t)
+        if hi <= lo:
+            continue
+        dt = (t - td[lo:hi]) / fps
+        dist = np.linalg.norm(pd_[lo:hi] - p, axis=1)
+        ok = dist <= GATE_M + GATE_MS * dt
+        for s_ in has:
+            has[s_] += int(np.any(ok & (dt <= s_)))
+        ambiguous += int(np.sum(ok & (dt <= 2)) >= 2)
+        if np.any(dt <= 5):
+            nearest5.append(dist[dt <= 5].min())
+    nb = max(len(births), 1)
+    out["births_per_min"] = round(len(births) / minutes, 1) if minutes else None
+    out["births_with_lost_track_in_gate"] = {f"within_{s_}s": round(v / nb, 3) for s_, v in has.items()}
+    out["births_ambiguous_2plus_candidates_2s"] = round(ambiguous / nb, 3)
+    out["births_next_to_active_same_team_track"] = round(dup / nb, 3)
+    out["births_nearest_lost_track_m_5s"] = q(nearest5, (25, 50, 75, 90))
+
+    # duplicates: frames where two tracks of one team sit on top of each other
+    dupf = np.zeros(n, dtype=bool)
+    for mask in (home, ~home):
+        P = xy[:, mask]
+        for a in range(0, n, 5000):
+            c = P[a:a + 5000]
+            D = np.linalg.norm(c[:, :, None, :] - c[:, None, :, :], axis=-1)
+            iu = np.triu_indices(c.shape[1], 1)
+            with np.errstate(invalid="ignore"):
+                dupf[a:a + 5000] |= np.any(D[:, iu[0], iu[1]] < DUP_M, axis=1)
+    out["share_frames_same_team_pair_within_1m"] = share(dupf, within=graded)
+
+    # one person under both team labels? home and away tracks on top of each other
+    cross = np.zeros(n, dtype=bool)
+    H, A = xy[:, home], xy[:, ~home]
+    for a in range(0, n, 5000):
+        D = np.linalg.norm(H[a:a + 5000, :, None, :] - A[a:a + 5000, None, :, :], axis=-1)
+        with np.errstate(invalid="ignore"):
+            cross[a:a + 5000] = np.any(D < 0.3, axis=(1, 2))
+    out["share_frames_home_away_pair_within_0.3m"] = share(cross, within=graded)
+    return out
+
+
 def profile_tags(spec: GameSpec, graded: np.ndarray) -> dict | None:
     if not spec.smart_tagging or not Path(spec.smart_tagging).exists():
         return None
@@ -230,10 +347,19 @@ def profile_homography(path: Path, fps: int, graded: np.ndarray) -> dict | None:
     }
 
 
-def profile(spec: GameSpec, homography: Path | None = None, use_cache: bool = True) -> dict:
+def profile(spec: GameSpec, homography: Path | None = None, use_cache: bool = True,
+            clean: bool = False) -> dict:
     trk = atd.load(spec, use_cache=use_cache)
     graded = graded_mask(spec)
-    out = {"recording": spec.name, "tracking": profile_tracking(trk, spec, graded)}
+    out = {"recording": spec.name, "tracking": profile_tracking(trk, spec, graded),
+           "identity": profile_identity(trk, spec, graded)}
+    if clean:
+        from . import tracks
+        ctrk, report = tracks.clean(trk, spec.fps, spec.pitch)
+        out["cleaning"] = report
+        out["identity_after_cleaning"] = profile_identity(ctrk, spec, graded)
+        out["tracking_after_cleaning"] = {k: v for k, v in profile_tracking(ctrk, spec, graded).items()
+                                          if k in ("players", "stillness")}
     tags = profile_tags(spec, graded)
     if tags is not None:
         out["smart_tagging"] = tags
@@ -260,6 +386,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--source", nargs="*", default=["tactical", "broadcast"], choices=["tactical", "broadcast"])
     ap.add_argument("--no-cache", action="store_true")
+    ap.add_argument("--clean", action="store_true", help="also profile after team-level cleaning (mqf.tracks)")
     args = ap.parse_args()
     report = {}
     for source in args.source:
@@ -267,7 +394,7 @@ def main():
         if not spec.atd_raw.exists():
             print(f"[{source}] missing {spec.atd_raw.name} -- skipped")
             continue
-        report[source] = profile(spec, homography_path(source=source), use_cache=not args.no_cache)
+        report[source] = profile(spec, homography_path(source=source), use_cache=not args.no_cache, clean=args.clean)
     print("=== mqf.profile -- aggregates only, safe to share ===")
     _print(report)
     out = REPORTS_DIR / "profile" / "profile.json"

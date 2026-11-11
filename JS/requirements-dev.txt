@@ -1,0 +1,4 @@
+# Tests, synthetic match, viewer demo videos (Pillow; ffmpeg on PATH for the .mp4s).
+-r requirements.txt
+pytest==9.1.1
+pillow==12.3.0

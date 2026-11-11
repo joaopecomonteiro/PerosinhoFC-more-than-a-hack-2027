@@ -11,15 +11,31 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-OFFICIAL_DIR = Path(os.environ.get("MTAH_OFFICIAL_DIR", ROOT / "vendor" / "mtah2027"))
-DATA_DIR = Path(os.environ.get("MTAH_DATA_DIR", ROOT / "data"))          # gated match bundle
+ROOT = Path(__file__).resolve().parents[1]                               # our package root (JS/)
+
+
+def _repo_root(pkg_root: Path) -> Path:
+    """The checkout that holds data/ and external_data/.
+
+    Two layouts are supported: our code at the top of its own repo, or our code in a subfolder
+    (JS/) of a fork of the official repo. In the fork the official files (games.py,
+    evaluation/) sit one level up, and so do data/ and external_data/.
+    """
+    up = pkg_root.parent
+    return up if (up / "games.py").is_file() and (up / "evaluation").is_dir() else pkg_root
+
+
+REPO_ROOT = _repo_root(ROOT)
+OFFICIAL_DIR = Path(os.environ.get("MTAH_OFFICIAL_DIR", ROOT / "vendor" / "mtah2027"))  # pinned (bootstrap.py)
+DATA_DIR = Path(os.environ.get("MTAH_DATA_DIR", REPO_ROOT / "data"))     # gated match bundle
 CACHE_DIR = Path(os.environ.get("MQF_CACHE_DIR", ROOT / "cache"))         # arrays derived from it
 RESULTS_DIR = ROOT / "results"                                            # our real-match submissions
 REPORTS_DIR = ROOT / "reports"                                            # official scorer output on them
 SYNTHETIC_DIR = ROOT / "synthetic_data"                                   # safe to inspect
-EXTERNAL_DIR = Path(os.environ.get("MQF_EXTERNAL_DIR", ROOT / "external"))  # other games (IDSSE...)
+EXTERNAL_RAW_DIR = Path(os.environ.get("MQF_EXTERNAL_RAW", REPO_ROOT / "external_data"))  # other games, as downloaded
+EXTERNAL_DIR = Path(os.environ.get("MQF_EXTERNAL_DIR", ROOT / "external"))  # derived from them (caches, bundles)
 HARNESS_DIR = ROOT / "harness_results"                                    # aggregates on other games
+MODELS_DIR = ROOT / "models"                                              # weights trained on other games only
 
 OFFICIAL_COMMIT = "f8f2629ff1e0985f81d7e59d8413678514ee1530"   # bump deliberately after reading upstream changes
 

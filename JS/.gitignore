@@ -1,0 +1,31 @@
+# Our code lives in JS/ of a fork of the official repo; the fork's own .gitignore covers data/ and
+# external_data/ at the top. Everything below is ours. The repo is PUBLIC: nothing derived from the
+# match data is ever committed (CLAUDE.md, rule 5) -- when in doubt, add it here first.
+
+# pinned official repo (python bootstrap.py)
+vendor/
+
+# derived from the real match: arrays, submissions, official scorer output, profile aggregates
+cache/
+results/
+reports/
+
+# generated / downloaded other games
+synthetic_data/
+external/
+external_data/
+data/
+
+# harness_results/ (aggregates on OTHER games) is committed on purpose.
+
+*.mp4
+*.npz
+*_atd.*
+*_homography.csv
+*_smart_tagging.xml
+
+.venv*/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/

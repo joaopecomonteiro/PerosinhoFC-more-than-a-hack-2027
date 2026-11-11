@@ -1,0 +1,12 @@
+# Ball imputation model (mqf/ball). Easiest, from JS/ with the venv active:
+#   python tasks.py install-torch            # CUDA 13.2 build of torch 2.15.0 + this file, into the venv
+# torch is NOT pinned from PyPI on purpose: the PyPI wheel for Windows is CPU-only, and pip would swap
+# your CUDA build for it. A venv made by uv has no pip, and a bare `pip` may then be conda's. By hand:
+#   nvidia-smi                                   # top right: the highest CUDA version your driver runs
+#   uv pip install --python .venv\Scripts\python.exe torch --index-url https://download.pytorch.org/whl/cu<XYZ>
+# (cu<XYZ> = the build pytorch.org/get-started lists for your driver; 2.15 ships cu132 / cu134 and
+#  needs a Turing or newer GPU; an older driver -> an older torch from "previous versions")
+# then:  uv pip install --python .venv\Scripts\python.exe -r requirements-model.txt
+#        python tasks.py torch-info            # must say GPU available True
+-r requirements-dev.txt
+torch>=2.4

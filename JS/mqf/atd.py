@@ -75,19 +75,24 @@ def parse_raw(raw_path: Path, n_frames: int, n_slots: int, pitch: tuple[float, f
     return Tracking(xy, sp, ball, np.zeros(n_slots, dtype=np.int8))
 
 
-def load(spec: GameSpec, use_cache: bool = True) -> Tracking:
-    """Parse once (a minute or two on the real match), then load from cache in seconds."""
+def load(spec: GameSpec, use_cache: bool = True, cache_dir: Path | None = None) -> Tracking:
+    """Parse once (a minute or two on the real match), then load from cache in seconds.
+
+    cache_dir: where the .npz goes (default cache/). Other games pass their own folder so their
+    arrays never sit next to the ones derived from the real match.
+    """
     team = team_of_each_slot(spec.atd_meta)
     stat = Path(spec.atd_raw).stat()
     key = hashlib.md5(f"{spec.atd_raw}|{stat.st_size}|{stat.st_mtime_ns}".encode()).hexdigest()[:10]
-    cache = CACHE_DIR / f"{spec.name}_atd_{key}.npz"
+    cache_dir = Path(cache_dir) if cache_dir is not None else CACHE_DIR
+    cache = cache_dir / f"{spec.name}_atd_{key}.npz"
     if use_cache and cache.exists():
         z = np.load(cache)
         return Tracking(z["players"], z["player_speed"], z["ball"], z["team_of_slot"])
     trk = parse_raw(spec.atd_raw, spec.n_frames, len(team), spec.pitch)
     trk.team_of_slot = team
     if use_cache:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        cache_dir.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(cache, players=trk.players, player_speed=trk.player_speed,
                             ball=trk.ball, team_of_slot=trk.team_of_slot)
     return trk

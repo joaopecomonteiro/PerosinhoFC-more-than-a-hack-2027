@@ -20,6 +20,8 @@ before bumping `OFFICIAL_COMMIT` (rules have been clarified mid-competition).
 1. **Never read, print, plot, summarise or receive the real match data or any extract** — the
    T&Cs forbid giving it to any cloud LLM, including you. Off-limits: `data/`, `cache/`,
    `results/`, `reports/`, `*.mp4`, `*_atd.*`, `*_homography.csv`, `*_smart_tagging.xml`.
+   In the fork layout (our code in `JS/`): the fork's `data/`, `JS/cache/`, `JS/results/`,
+   `JS/reports/`, and also the fork's `evaluation/results/` (baselines computed from the ATD).
    `.claude/settings.json` denies them; respect the intent too (no `head`, `np.load`, notebook
    outputs via Bash). Work from the schema, `mqf/synthetic.py` and other games. The team runs
    real-data commands and shares only aggregates (spellF1, macroF1, poss, dur, transF1,
@@ -53,6 +55,16 @@ counts once regardless of length → short spells matter; splitting (spurious D/
 (missed short stoppage or short opponent spell) both cost. 1-frame lag free, 1 s kills short
 spells. Noise: spellF1 ±0.04 on one match, macroF1 ±0.01; harness noise seeds alone move spellF1
 by ~±0.06, so average over matches × seeds.
+
+## Data priority (Sigmar, 10 Nov)
+- Work on **our match's tactical and broadcast recordings** first. For an AI assistant that means:
+  build against the schema and the synthetic match, the team runs it on the real files and shares
+  aggregates (rule 1 is unchanged).
+- Other games (IDSSE, Metrica, SkillCorner bundles in `external/bundles/`) only when a task needs a
+  lot of data. They stay as is: no added noise, no resampling. `source` is kept as a column; which
+  sources a task uses is decided per task. SkillCorner (10 fps) is not used for training.
+- Split by game, per source, fixed in `splits.json` (`python -m mqf.external.splits`).
+- Ball visibility / imputation is a later, separate model.
 
 ## How we work
 - Pipeline `mqf/atd.py → features.py (+ smart_tagging.py) → decode.py → submission.py`, CLI

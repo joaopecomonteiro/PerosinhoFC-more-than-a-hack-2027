@@ -206,7 +206,7 @@ whole possessions with sharp boundaries.
   metric) — never copied or reimplemented. Pin bumped only after reading organiser changes.
 - External validation moves **up** and switches to datasets whose labels look like ours:
   **per-frame alive flag + owning team from clean tracking.** Primary: **IDSSE** (Bassek et al.
-  2025; 7 Bundesliga 2022/23 matches, official DFL tracking + events, ~2.4 GB) —
+  2025; 7 matches 2022/23 — 2 Bundesliga + 5 2. Bundesliga — official DFL tracking + events, ~2.4 GB) —
   `floodlight.io.datasets.IDSSEDataset().get(match_id)` returns positions plus `possession`
   (home/away) and `ballstatus` (alive/dead) codes, i.e. exactly our H/A/D shape. Licence: check the
   paper's terms before use and cite it. Second: SkillCorner open data (possession group per frame —

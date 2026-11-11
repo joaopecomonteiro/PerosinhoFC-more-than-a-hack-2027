@@ -42,6 +42,7 @@ def main():
     ap.add_argument("--matches", nargs="*", help="match ids (idsse) or seeds (synthetic); default all")
     ap.add_argument("--seeds", nargs="*", type=int, default=[0], help="noise seeds per match")
     ap.add_argument("--tag", default="dev")
+    ap.add_argument("--clean-tracks", action="store_true", help="team-level tracklet cleaning (mqf.tracks) before features")
     ap.add_argument("--noise", nargs="*", default=[], metavar="FIELD=VALUE",
                     help="override NoiseConfig assumptions, e.g. jitter_corr_s=1.0 (robustness checks)")
     args = ap.parse_args()
@@ -53,7 +54,7 @@ def main():
     for m in matches(args.source, args.matches):
         for s in args.seeds:
             cfg = replace(base, seed=s)
-            r = score(m["labels"], predict(m, params, cfg), m["fps"])
+            r = score(m["labels"], predict(m, params, cfg, clean_tracks=args.clean_tracks), m["fps"])
             rows.append({"match": m["name"], "noise_seed": s, **r})
             buckets = "  ".join(f"{k}:{v['match_rate']:.2f}(n={v['n']})" for k, v in r["by_length"].items()
                                 if v["match_rate"] is not None)
@@ -65,7 +66,7 @@ def main():
           f"({len(rows)} runs)")
     HARNESS_DIR.mkdir(parents=True, exist_ok=True)
     out = HARNESS_DIR / f"{args.source}_{args.tag}.json"
-    out.write_text(json.dumps({"params": asdict(params), "noise": asdict(base),
+    out.write_text(json.dumps({"params": asdict(params), "noise": asdict(base), "clean_tracks": args.clean_tracks,
                                "mean_spellF1": float(sf.mean()), "mean_macroF1": float(mf.mean()),
                                "runs": rows}, indent=2, default=float))
     print(f"wrote {out}")

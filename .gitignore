@@ -32,6 +32,8 @@ evaluation/scoreboard.csv
 data/*
 !data/README.md
 
+external_data/*
+
 *.mp4
 *.gzip
 *.pl3container

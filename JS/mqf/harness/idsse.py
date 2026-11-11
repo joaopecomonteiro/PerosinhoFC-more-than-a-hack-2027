@@ -1,16 +1,23 @@
 """IDSSE (Bassek et al., Scientific Data 2025) -> clean match in our harness format.
 
-7 Bundesliga 2022/23 matches, official DFL tracking at 25 fps with PER-FRAME ball status
+7 German matches 2022/23 (2 Bundesliga + 5 2. Bundesliga), official DFL tracking at 25 fps with PER-FRAME ball status
 (0 Dead / 1 Alive) and ball possession (1 Home / 2 Away) -- the same kind of label as the
 competition ground truth (derived from tracking, not from events). Other games only, so allowed;
 cite the paper in TECHNICAL.md and respect its licence.
 
     pip install -r requirements-harness.txt
-    python -m mqf.harness.idsse J03WMX            # downloads (~350 MB/match) + prints a summary
+    python -m mqf.harness.idsse J03WMX            # parse + cache one match, print a summary
+    python -m mqf.harness.idsse                   # all 7
+
+Reads the DFL XML from external_data/idsse/ (MQF_EXTERNAL_RAW) when it is there, named as on
+figshare (DFL_04_03_positions_raw_observed_<COM>_DFL-MAT-<id>.xml + matchinformation); otherwise
+floodlight downloads it (~350 MB per match).
 
 floodlight API verified against floodlight 1.2.0 source:
   IDSSEDataset(match_id).get(match_id, events=False)
     -> (None, xy, possession, ballstatus, teamsheets, pitch)
+  dfl.read_position_data_xml(filepath_positions, filepath_mat_info)   (what .get calls)
+    -> (xy, possession, ballstatus, teamsheets, pitch)
   xy[segment]["Home"|"Away"|"Ball"].xy : (T, 2N) / (T, 2), metres, pitch centred (xlim = (-L/2, L/2))
   possession[segment].code / ballstatus[segment].code : (T,) floats
   segments: "firstHalf", "secondHalf"
@@ -18,10 +25,11 @@ floodlight API verified against floodlight 1.2.0 source:
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 import numpy as np
 
-from ..config import EXTERNAL_DIR, official
+from ..config import EXTERNAL_DIR, EXTERNAL_RAW_DIR, official
 
 MATCHES = ("J03WMX", "J03WN1", "J03WPY", "J03WOH", "J03WQQ", "J03WOY", "J03WR9")
 SEGMENTS = ("firstHalf", "secondHalf")
@@ -88,6 +96,47 @@ def load_cache(path, name: str) -> dict:
             "pitch": tuple(float(v) for v in z["pitch"]), "fps": int(z["fps"]), "name": name}
 
 
+def raw_files(match_id: str, raw_dir: Path | None = None) -> tuple[Path, Path] | None:
+    """(positions XML, matchinformation XML) of a local IDSSE copy, named as on figshare, or None."""
+    d = Path(raw_dir) if raw_dir else EXTERNAL_RAW_DIR / "idsse"
+    pos = sorted(d.glob(f"DFL_04_03_positions_raw_observed_*_DFL-MAT-{match_id}.xml"))
+    info = sorted(d.glob(f"DFL_02_01_matchinformation_*_DFL-MAT-{match_id}.xml"))
+    return (pos[0], info[0]) if pos and info else None
+
+
+def team_names(match_id: str, raw_dir: Path | None = None) -> tuple[str, str]:
+    """(home, guest) from the local matchinformation XML; ("Home", "Away") without it."""
+    import re
+    d = Path(raw_dir) if raw_dir else EXTERNAL_RAW_DIR / "idsse"
+    info = sorted(d.glob(f"DFL_02_01_matchinformation_*_DFL-MAT-{match_id}.xml"))
+    if info:
+        text = info[0].read_text(encoding="utf-8", errors="replace")
+        h, g = re.search(r'HomeTeamName="([^"]*)"', text), re.search(r'GuestTeamName="([^"]*)"', text)
+        if h and g:
+            return h.group(1), g.group(1)
+    return "Home", "Away"
+
+
+def read_floodlight(match_id: str, raw_dir: Path | None = None):
+    """(xy, possession, ballstatus, pitch): from external_data/idsse/ when the files are there,
+    otherwise floodlight's own download (figshare, ~350 MB per match)."""
+    try:
+        from floodlight.io import dfl
+    except ImportError as e:
+        raise SystemExit("floodlight missing:  pip install -r requirements-harness.txt "
+                         "(in its own venv: floodlight 1.2.0 needs pandas < 3)") from e
+    files = raw_files(match_id, raw_dir)
+    if files:
+        print(f"{match_id}: parsing {files[0].name} (a few minutes)")
+        xy, possession, ballstatus, _, pitch = dfl.read_position_data_xml(str(files[0]), str(files[1]))
+        return xy, possession, ballstatus, pitch
+    from floodlight.io.datasets import IDSSEDataset
+    print(f"{match_id}: no local copy in {raw_dir or EXTERNAL_RAW_DIR / 'idsse'} -- downloading via floodlight")
+    ds = IDSSEDataset(match_id=match_id)
+    _, xy, possession, ballstatus, _, pitch = ds.get(match_id, events=False)
+    return xy, possession, ballstatus, pitch
+
+
 def load_match(match_id: str, use_cache: bool = True) -> dict:
     """Converted match, cached in external/idsse/ (gitignored) -- the DFL XML parse takes minutes.
 
@@ -96,19 +145,13 @@ def load_match(match_id: str, use_cache: bool = True) -> dict:
     """
     cache = _cache_path(match_id)
     if not (use_cache and cache.exists()):
-        try:
-            from floodlight.io.datasets import IDSSEDataset
-        except ImportError as e:
-            raise SystemExit("floodlight missing:  pip install -r requirements-harness.txt "
-                             "(in its own venv: floodlight 1.2.0 needs pandas < 3)") from e
-        ds = IDSSEDataset(match_id=match_id)             # downloads into floodlight's .data/ once
-        _, xy, possession, ballstatus, _, pitch = ds.get(match_id, events=False)
+        xy, possession, ballstatus, pitch = read_floodlight(match_id)
         save_cache(from_floodlight(xy, possession, ballstatus, pitch), cache)
     return load_cache(cache, f"IDSSE-{match_id}")
 
 
 if __name__ == "__main__":
-    for mid in sys.argv[1:] or MATCHES[:1]:
+    for mid in sys.argv[1:] or MATCHES:
         m = load_match(mid)
         graded = np.zeros(len(m["labels"]), dtype=bool)
         for _, first, last in m["halves"]:
