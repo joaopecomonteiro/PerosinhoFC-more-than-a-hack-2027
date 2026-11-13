@@ -60,7 +60,7 @@ by ~±0.06, so average over matches × seeds.
 - Work on **our match's tactical and broadcast recordings** first. For an AI assistant that means:
   build against the schema and the synthetic match, the team runs it on the real files and shares
   aggregates (rule 1 is unchanged).
-- Other games (IDSSE, Metrica, SkillCorner bundles in `external/bundles/`) only when a task needs a
+- Other games (IDSSE, Metrica, SkillCorner, PFF World Cup 2022 bundles in `external/bundles/`) only when a task needs a
   lot of data. They stay as is: no added noise, no resampling. `source` is kept as a column; which
   sources a task uses is decided per task. SkillCorner (10 fps) is not used for training.
 - Split by game, per source, fixed in `splits.json` (`python -m mqf.external.splits`).

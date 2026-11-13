@@ -26,11 +26,15 @@ class Params:
     still_width: float = 0.35
     w_seen: float = 1.0           # evidence weight when the ball is tracked
     w_unseen: float = 0.15        # ... when it is not (let the HMM carry the state)
+    w_filled: float = 0.4         # "who" weight on an imputed ball (alive/dead stays at w_unseen there); EXP #18
     w_spread: float = 0.15        # team-shape hint when the ball is missing
     w_tags: float = 0.4           # Smart Tagging log-odds weight per vote
     switch_cost: float = 18.0     # H <-> A
     to_dead_cost: float = 10.0    # H/A -> D
     from_dead_cost: float = 10.0  # D -> H/A
+    w_dead: float = 1.0           # weight of the learned P(dead) (mqf.dead) when features carry it
+    dead_who: str = "zero"        # D's "who" term: "zero" (v0: uncertainty about who quietly favours D)
+                                  # or "max" (who-evidence never favours or penalises D)
 
 
 def _sig(x):
@@ -41,28 +45,43 @@ def emissions(feat: pd.DataFrame, p: Params, tags: TagEvidence | None = None) ->
     """(n, 3) log-likelihoods for H, A, D."""
     eps = 1e-4
     seen = feat["ball_seen"].to_numpy()
+    filled = feat["ball_filled"].to_numpy() if "ball_filled" in feat else np.zeros(len(feat), dtype=bool)
+    tracked = seen & ~filled
     d_min = np.fmin(feat["d_home"].to_numpy(), feat["d_away"].to_numpy())
     d_diff = np.nan_to_num(feat["d_diff"].to_numpy())
 
     # who: closer team, faded when the ball is loose
     control = np.where(seen, _sig((p.loose_m - np.nan_to_num(d_min, nan=99.0)) / 1.0), 0.0)
     logit_h = control * d_diff / p.tau_m
-    logit_h += p.w_spread * np.nan_to_num(feat["spread_diff"].to_numpy()) * (~seen)
+    logit_h += p.w_spread * np.nan_to_num(feat["spread_diff"].to_numpy()) * (~tracked)
     if tags is not None:
         logit_h += p.w_tags * (tags.vote[:, 0] - tags.vote[:, 1])
     p_h = np.clip(_sig(logit_h), eps, 1 - eps)
 
-    # alive vs dead: players standing still, or ball clearly off the pitch
+    # alive vs dead: players standing still (v0 rule, or the learned P(dead)), or ball clearly off the pitch
     ms = np.nan_to_num(feat["mean_player_speed"].to_numpy(), nan=p.still_speed)
     p_dead = _sig((p.still_speed - ms) / p.still_width)
+    learned = "p_dead_model" in feat and bool(feat["p_dead_model"].notna().any())
+    if learned:
+        pdm = feat["p_dead_model"].to_numpy(dtype=np.float64)
+        p_dead = np.where(np.isnan(pdm), p_dead, pdm)
     p_dead = np.where(feat["ball_out"].to_numpy(), 0.97, p_dead)
     p_dead = np.clip(p_dead, eps, 1 - eps)
 
-    ll = np.stack([np.log(1 - p_dead) + np.log(p_h),
-                   np.log(1 - p_dead) + np.log(1 - p_h),
-                   np.log(p_dead)], axis=1)
-    w = np.where(seen, p.w_seen, p.w_unseen)[:, None]
-    return ll * w
+    if not filled.any() and not learned and p.dead_who == "zero":      # v0, bit for bit
+        ll = np.stack([np.log(1 - p_dead) + np.log(p_h),
+                       np.log(1 - p_dead) + np.log(1 - p_h),
+                       np.log(p_dead)], axis=1)
+        return ll * np.where(seen, p.w_seen, p.w_unseen)[:, None]
+    alive_ll = np.stack([np.log(1 - p_dead), np.log(1 - p_dead), np.log(p_dead)], axis=1)
+    d_who = np.maximum(np.log(p_h), np.log(1 - p_h)) if p.dead_who == "max" else np.zeros_like(p_h)
+    who_ll = np.stack([np.log(p_h), np.log(1 - p_h), d_who], axis=1)
+    if learned:                       # the learned P(dead) comes from the players: same weight with or without a ball
+        w_ad = np.where(feat["ball_out"].to_numpy(), p.w_seen, p.w_dead)[:, None]
+    else:
+        w_ad = np.where(tracked, p.w_seen, p.w_unseen)[:, None]                 # an imputed ball says nothing
+    w_who = np.where(filled, p.w_filled, np.where(tracked, p.w_seen, p.w_unseen))[:, None]  # about dead
+    return alive_ll * w_ad + who_ll * w_who
 
 
 def viterbi(ll: np.ndarray, p: Params) -> np.ndarray:

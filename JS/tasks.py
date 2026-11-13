@@ -191,7 +191,7 @@ def fetch_skillcorner(a, extra):
 
 @task("bundles")
 def bundles(a, extra):
-    """Write IDSSE / Metrica / SkillCorner as tactical-format bundles (no noise, native fps) + QA lines."""
+    """Write IDSSE / Metrica / SkillCorner / PFF as tactical-format bundles (no noise, native fps) + QA lines."""
     run(PY, "-m", "mqf.external.build", *extra)
 
 
@@ -243,6 +243,12 @@ def train_ball_all(a, extra):
     for arch in ("A", "B"):
         for pm in ("off", "on"):
             run(PY, "-m", "mqf.ball.train", "--arch", arch, "--player-mask", pm, "--tag", a.tag, *extra)
+
+
+@task("train-dead")
+def train_dead(a, extra):
+    """Learned P(dead) from the players (mqf.dead) on IDSSE + Metrica + PFF -> models/dead_<tag>.joblib."""
+    run(PY, "-m", "mqf.dead", "train", "--tag", a.tag, *extra)
 
 
 @task("eval-ball")
@@ -301,7 +307,7 @@ def profile(a, extra):
 
 @task("impute-ball", real=True)
 def impute_ball(a, extra):
-    """Fill BAR-ATH's missing ball (e.g. -- --model models/ball_A_off.pt --method hybrid --tau 1); aggregates only."""
+    """Fill BAR-ATH's missing ball with the frozen setting (mqf.ball.impute.FROZEN; --device cuda ok); aggregates only."""
     run(PY, "-m", "mqf.ball.impute", *extra)
 
 

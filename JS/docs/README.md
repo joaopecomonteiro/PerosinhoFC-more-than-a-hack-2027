@@ -70,6 +70,7 @@ python -m mqf.viewer                                 # BAR-ATH: tactical / broad
                                                      # public GT + every results/*.csv as lanes
 python -m mqf.viewer --pred results/a.csv --pred results/b.csv
 python -m mqf.viewer.demo && python -m mqf.viewer --synthetic   # no match data needed (ffmpeg for the videos)
+python -m mqf.viewer --no-fixed                      # skip the cleaned / ball-filled tracking
 ```
 
 A local page (server on 127.0.0.1) with one playhead: the video or the pitch, then the ground truth
@@ -78,6 +79,13 @@ tracking saw at that frame. The broadcast feed is linked to the tactical timelin
 from the two tracking files (`mqf/viewer/sync.py`, cached in `cache/`). On BAR-ATH the ground truth
 is the public 5 minutes: use it to check correctness, never to tune. Keep screenshots of the real
 match out of AI chats.
+
+The top bar switches the tracking (key T) between **Original** (as delivered) and **Fixed** (our
+cleaned tracklets from `mqf/tracks.py` + the missing ball filled with the frozen setting of
+`mqf/ball/impute.py`), on the pitch and on the video overlay. A filled ball is a dashed ring
+(white = interpolated, amber = model), and the rail says which, with the length of the gap. With no
+stoppage detector yet, every gap in the halves is filled, stoppages included. The Fixed set is
+computed once (model on the GPU if there is one) and cached in `cache/viewer/`.
 
 ## Layout
 
@@ -93,7 +101,8 @@ mqf/
   make_submission.py CLI
   harness/           validation on other games: ATD noise model, IDSSE adapter, official-metric scoring
   external/          other games: SkillCorner LFS fetcher (converters to the tactical format next)
-  viewer/            local match viewer: video / pitch + GT and model lanes, broadcast sync
+  viewer/            local match viewer: video / pitch + GT and model lanes, broadcast sync,
+                     Original / Fixed tracking switch (fixed.py)
 tests/               synthetic e2e (official scorer + validator, determinism, ATD round-trip), harness, fetcher
 tasks.py  Makefile   every command (python tasks.py help)
 bootstrap.py         official repo -> vendor/mtah2027 at the pinned commit; --check-updates, --status

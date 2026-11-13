@@ -21,6 +21,7 @@ Modules
   game.py    the data contract (`ViewerGame`) and the adapters that build it: BAR-ATH, synthetic.
              A new source of games (PFF, IDSSE) is one more adapter returning a ViewerGame.
   sync.py    broadcast <-> tactical frame alignment, computed from the two tracking files.
+  fixed.py   the "Fixed" tracking (cleaned tracklets + filled ball) the page can switch to (key T).
   server.py  localhost HTTP server: page, binary arrays, videos with Range requests.
   demo.py    synthetic broadcast feed + rendered videos, for trying the viewer without real data.
 """

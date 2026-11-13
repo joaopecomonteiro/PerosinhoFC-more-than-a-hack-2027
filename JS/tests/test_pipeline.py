@@ -82,3 +82,14 @@ def test_compare_two_submissions(syn_spec, syn_submission, tmp_path):
     b[first:first + 50] = "D"
     r = compare.compare(a, b, syn_spec.halves, syn_spec.fps)
     assert r["changed_stretches"]["n"] >= 1 and 0 < r["graded_frames_changed"] < 0.01
+
+
+def test_compare_resolves_names_and_reports_missing(tmp_path):
+    import pytest
+    from mqf import compare
+    (tmp_path / "base_v0.csv").write_text("frame,label\n0,H\n")
+    assert compare.resolve("base_v0", tmp_path) == tmp_path / "base_v0.csv"
+    assert compare.resolve("results/base_v0.csv", tmp_path) == tmp_path / "base_v0.csv"
+    with pytest.raises(SystemExit) as e:
+        compare.resolve("results/Perosinho_FC.csv", tmp_path)
+    assert "base_v0.csv" in str(e.value) and "tasks.py submit" in str(e.value)

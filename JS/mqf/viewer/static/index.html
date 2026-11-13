@@ -24,6 +24,7 @@
     <button role="tab" data-view="pitch" aria-selected="false">Pitch</button>
   </div>
   <div class="top-actions">
+    <div class="seg small" role="group" aria-label="Tracking data (T)" id="trkSeg" hidden></div>
     <label class="toggle"><input type="checkbox" id="optOverlay" checked><span class="track" aria-hidden="true"></span>Tracking on video</label>
     <label class="toggle"><input type="checkbox" id="optTrails" checked><span class="track" aria-hidden="true"></span>Trails</label>
     <button class="ghost icon-only" id="helpBtn" aria-label="Keyboard shortcuts" aria-expanded="false">
@@ -79,6 +80,7 @@
     <section class="block">
       <h2 class="label">Tracking here</h2>
       <dl class="kv">
+        <div><dt>Data</dt><dd id="trkSet">Original</dd></div>
         <div><dt>Ball</dt><dd id="trkBall">—</dd></div>
         <div><dt id="trkHomeName">Home players</dt><dd class="num" id="trkHome">—</dd></div>
         <div><dt id="trkAwayName">Away players</dt><dd class="num" id="trkAway">—</dd></div>
@@ -143,6 +145,7 @@
     <div><dt>, .</dt><dd>Previous / next disagreement</dd></div>
     <div><dt>1 2 3</dt><dd>Tactical, broadcast, pitch</dd></div>
     <div><dt>O</dt><dd>Tracking on video</dd></div>
+    <div><dt>T</dt><dd>Original / fixed tracking</dd></div>
     <div><dt>+ −</dt><dd>Lens width</dd></div>
   </dl>
   <p class="muted small">Drop a frame,label CSV anywhere to add a lane.</p>

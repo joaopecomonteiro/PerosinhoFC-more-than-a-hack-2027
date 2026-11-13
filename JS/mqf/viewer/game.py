@@ -8,6 +8,8 @@ adapter function and nothing in the server or the page changes:
                  tactical video, i.e. a submission row)
       halves     [(half, first, last)] inclusive, the graded blocks
       tracking   players (n, slots, 2) metres + team_of_slot, ball (n, 2) metres; NaN = not tracked
+                 ("Original", as delivered) and optional extra sets on the same timeline -- "Fixed" =
+                 our cleaned tracklets + filled ball (fixed.py), switchable on the page
       lanes      label tracks on the match timeline: 0 H, 1 A, 2 D, 3 no label (X / outside GT)
       videos     each with its own frame count, an optional homography (normalised pitch -> pixels)
                  and, when its timeline is not the match timeline, the two frame maps
@@ -61,6 +63,18 @@ class Video:
 
 
 @dataclass
+class TrackingSet:
+    """Another version of the tracking on the same timeline (its own slots)."""
+    key: str                   # blob suffix: players_<key>, ball_<key>, ballsrc_<key>
+    label: str
+    players: np.ndarray        # (n, slots, 2) metres
+    team_of_slot: np.ndarray   # (slots,)
+    ball: np.ndarray           # (n, 2) metres
+    ball_source: np.ndarray | None = None   # (n,) uint8: 0 tracked, 1 interpolated, 2 model, 3 empty
+    note: str = ""
+
+
+@dataclass
 class ViewerGame:
     key: str
     title: str
@@ -76,6 +90,7 @@ class ViewerGame:
     lanes: list[Lane]
     videos: list[Video]
     notes: list[str] = field(default_factory=list)
+    extra_tracking: list[TrackingSet] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------------- readers
@@ -202,8 +217,20 @@ def find_video(expected: Path, log: Log) -> tuple[Path, str]:
 
 # ---------------------------------------------------------------------------------- adapters
 
+def _fixed(trk, spec, fixed, log) -> list[TrackingSet]:
+    """The "Fixed" set, or nothing (no --no-fixed, never fatal)."""
+    if not fixed:
+        return []
+    from .fixed import fixed_tracking
+    try:
+        return [fixed_tracking(trk, spec.fps, spec.pitch, spec.halves, log=log, **fixed)]
+    except Exception as e:                       # the viewer must open even if this fails
+        log(f"fixed tracking skipped: {type(e).__name__}: {e}")
+        return []
+
+
 def competition(preds=None, gt: str | Path = "public", broadcast: bool = True, resync: bool = False,
-                log: Log = print) -> ViewerGame:
+                log: Log = print, fixed: dict | None = None) -> ViewerGame:
     """FC Barcelona v Athletic Club: tactical (the match timeline) + broadcast (auto-synced)."""
     from ..config import competition_game, homography_path, official
     games, _ = official()
@@ -249,10 +276,11 @@ def competition(preds=None, gt: str | Path = "public", broadcast: bool = True, r
     return ViewerGame(key=games.GAME, title=f"{home} v {away}", home=home, away=away, fps=spec.fps,
                       n_frames=spec.n_frames, pitch=spec.pitch, halves=spec.halves,
                       players=trk.players, team_of_slot=trk.team_of_slot, ball=trk.ball,
-                      lanes=lanes, videos=videos, notes=notes)
+                      lanes=lanes, videos=videos, notes=notes, extra_tracking=_fixed(trk, spec, fixed, log))
 
 
-def synthetic_game(preds=None, gt=None, resync: bool = False, log: Log = print) -> ViewerGame:
+def synthetic_game(preds=None, gt=None, resync: bool = False, log: Log = print,
+                   fixed: dict | None = None) -> ViewerGame:
     """The synthetic match (full ground truth). Videos appear once `python -m mqf.viewer.demo`
     has rendered them; until then the pitch view carries everything."""
     from .. import decode, make_submission, synthetic
@@ -291,7 +319,7 @@ def synthetic_game(preds=None, gt=None, resync: bool = False, log: Log = print) 
     return ViewerGame(key="SYN", title=f"{home} v {away}", home=home, away=away, fps=spec.fps,
                       n_frames=spec.n_frames, pitch=spec.pitch, halves=spec.halves,
                       players=trk.players, team_of_slot=trk.team_of_slot, ball=trk.ball,
-                      lanes=lanes, videos=videos, notes=notes)
+                      lanes=lanes, videos=videos, notes=notes, extra_tracking=_fixed(trk, spec, fixed, log))
 
 
 # ---------------------------------------------------------------------------------- to the page
@@ -320,6 +348,18 @@ def bundle(game: ViewerGame) -> tuple[dict, dict[str, bytes]]:
                 blobs[f"{name}_{v.key}"] = np.ascontiguousarray(arr).astype(dtype).tobytes()
                 entry[name] = f"{name}_{v.key}"
         videos.append(entry)
+    tracking = [{"key": "original", "label": "Original", "players": "players", "ball": "ball", "ball_source": None,
+                 "n_slots": int(game.players.shape[1]), "team_of_slot": game.team_of_slot.astype(int).tolist(),
+                 "note": "As delivered"}]
+    for t in game.extra_tracking:
+        entry = {"key": t.key, "label": t.label, "players": f"players_{t.key}", "ball": f"ball_{t.key}",
+                 "ball_source": None, "n_slots": int(t.players.shape[1]),
+                 "team_of_slot": np.asarray(t.team_of_slot).astype(int).tolist(), "note": t.note}
+        blobs[entry["players"]], blobs[entry["ball"]] = _cm(t.players), _cm(t.ball)
+        if t.ball_source is not None:
+            entry["ball_source"] = f"ballsrc_{t.key}"
+            blobs[entry["ball_source"]] = np.asarray(t.ball_source, dtype=np.uint8).tobytes()
+        tracking.append(entry)
     hom_t = next((v.homography for v in game.videos if v.key == "tactical"), None)
     meta = {
         "key": game.key, "title": game.title, "home": game.home, "away": game.away,
@@ -327,5 +367,6 @@ def bundle(game: ViewerGame) -> tuple[dict, dict[str, bytes]]:
         "halves": [list(map(int, h)) for h in game.halves],
         "n_slots": int(game.players.shape[1]), "team_of_slot": game.team_of_slot.astype(int).tolist(),
         "orientation": pitch_orientation(hom_t), "lanes": lanes, "videos": videos, "notes": game.notes,
+        "tracking": tracking,
     }
     return meta, blobs

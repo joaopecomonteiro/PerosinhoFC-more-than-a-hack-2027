@@ -315,14 +315,14 @@ h1 { font-size: var(--fs-title); line-height: 24px; font-weight: 600; white-spac
 /* ------------------------------------------------------------------ narrower windows */
 @media (max-width: 1100px) {
   :root { --rail-width: 300px; }
-  .top-actions .toggle:nth-child(2) { display: none; }
+  .top-actions label.toggle:nth-of-type(2) { display: none; }
   .wordmark, .crumb-sep { display: none; }
 }
 @media (max-width: 820px) {
   html, body { height: auto; }
   body { overflow: auto; grid-template-rows: auto auto; }
   .topbar { grid-template-columns: 1fr auto; grid-template-rows: 48px auto; padding: 0 16px 10px; row-gap: 6px; }
-  .topbar .seg { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
+  .topbar > .seg { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
   .top-actions .toggle { display: none; }
   .workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; padding: 12px 16px 16px; }
   .stage-col { min-height: auto; }
@@ -341,3 +341,7 @@ h1 { font-size: var(--fs-title); line-height: 24px; font-weight: 600; white-spac
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: 0ms !important; }
 }
+
+/* ------------------------------------------------------------------ tracking switch */
+#trkSeg button { min-width: 64px; }
+.kv dd.imputed { color: var(--diff, #e5a93b); }

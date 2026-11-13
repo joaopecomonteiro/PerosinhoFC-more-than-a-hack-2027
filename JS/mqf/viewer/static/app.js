@@ -17,6 +17,7 @@ const $ = (id) => document.getElementById(id);
 const S = {
   meta: null, fps: 25, n: 0, L: 105, W: 68,
   players: null, ball: null, slots: 0, team: null,
+  sets: [], set: 'original', ballSrc: null, origBall: null,   // tracking versions (Original / Fixed)
   lanes: [], truth: -1, compare: -1,
   videos: {}, view: 'tactical',
   frame: 0, playing: false, rate: 1, lensSec: 30,
@@ -122,14 +123,20 @@ async function fetchBin(name, onBytes) {
 async function load() {
   const meta = await (await fetch('/api/meta')).json();
   S.meta = meta; S.fps = meta.fps; S.n = meta.n_frames; [S.L, S.W] = meta.pitch;
-  S.slots = meta.n_slots; S.team = Uint8Array.from(meta.team_of_slot);
   document.title = `${meta.title} · Més que un Frame`;
   $('title').textContent = meta.title;
   $('gameKey').textContent = meta.key;
 
-  const wanted = ['players', 'ball', ...meta.lanes.map((l) => l.blob)];
+  // every tracking version (Original = as delivered; Fixed = cleaned tracklets + filled ball)
+  const sets = meta.tracking || [{ key: 'original', label: 'Original', players: 'players', ball: 'ball',
+    ball_source: null, n_slots: meta.n_slots, team_of_slot: meta.team_of_slot, note: 'As delivered' }];
+  const wanted = [...meta.lanes.map((l) => l.blob)];
+  const sizes = {};
+  for (const t of sets) {
+    wanted.push(t.players, t.ball); sizes[t.players] = S.n * t.n_slots * 4; sizes[t.ball] = S.n * 4;
+    if (t.ball_source) wanted.push(t.ball_source);
+  }
   for (const v of meta.videos) for (const k of ['homography', 'to_match', 'from_match', 'state']) if (v[k]) wanted.push(v[k]);
-  const sizes = { players: S.n * S.slots * 4, ball: S.n * 4 };
   const total = wanted.reduce((a, k) => a + (sizes[k] || S.n), 0);
   let got = 0;
   const progress = (b) => {
@@ -140,8 +147,13 @@ async function load() {
   const bufs = {};
   await Promise.all(wanted.map(async (k) => { bufs[k] = await fetchBin(k, progress); }));
 
-  S.players = new Int16Array(bufs.players);
-  S.ball = new Int16Array(bufs.ball);
+  S.sets = sets.map((t) => ({
+    key: t.key, label: t.label, note: t.note || '', slots: t.n_slots, team: Uint8Array.from(t.team_of_slot),
+    players: new Int16Array(bufs[t.players]), ball: new Int16Array(bufs[t.ball]),
+    src: t.ball_source ? new Uint8Array(bufs[t.ball_source]) : null,
+  }));
+  S.origBall = S.sets[0].ball;
+  useSet(S.sets[0].key, false);
   meta.lanes.forEach((l) => S.lanes.push(makeLane(l.name, l.kind, l.source, new Uint8Array(bufs[l.blob]))));
   S.truth = S.lanes.findIndex((l) => l.kind === 'truth');
   S.compare = S.lanes.findIndex((l) => l.kind === 'model');
@@ -286,13 +298,14 @@ function setLens(sec) {
 
 // ---------------------------------------------------------------------------- hash (come back to a moment)
 let hashTimer = null;
-function writeHash() { try { history.replaceState(null, '', `#f=${S.frame}&v=${S.view}`); } catch { /* file: */ } }
+function writeHash() { try { history.replaceState(null, '', `#f=${S.frame}&v=${S.view}&t=${S.set}`); } catch { /* file: */ } }
 function writeHashSoon() { clearTimeout(hashTimer); hashTimer = setTimeout(writeHash, 300); }
 function readHash() {
   const p = new URLSearchParams(location.hash.slice(1));
   const out = {};
   if (p.has('f')) out.f = +p.get('f');
   if (p.has('v')) out.v = p.get('v');
+  if (p.has('t')) out.t = p.get('t');
   return out;
 }
 
@@ -344,6 +357,41 @@ function lastBall(f, maxBack) {
   for (let g = f; g >= Math.max(0, f - maxBack); g--) { const b = ballAt(g); if (b) return { b, ago: f - g }; }
   return null;
 }
+const BALL_SRC = ['Tracked', 'Interpolated', 'Model', 'Not filled'];
+function ballSource(f) { return S.ballSrc ? S.ballSrc[f] : 0; }
+function gapAround(f) {                    // length of the gap in the DELIVERED ball that frame f sits in
+  const B = S.origBall, lim = 20 * 60 * S.fps;
+  if (B[f * 2] !== MISSING) return 0;
+  let a = f, b = f;
+  while (a > 0 && f - a < lim && B[(a - 1) * 2] === MISSING) a--;
+  while (b < S.n - 1 && b - f < lim && B[(b + 1) * 2] === MISSING) b++;
+  return b - a + 1;
+}
+function useSet(key, persist = true) {
+  const t = S.sets.find((x) => x.key === key) || S.sets[0];
+  S.set = t.key; S.players = t.players; S.ball = t.ball; S.slots = t.slots; S.team = t.team; S.ballSrc = t.src;
+  document.querySelectorAll('#trkSeg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.set === t.key)));
+  if (persist) { store.set(`set.${S.meta.key}`, t.key); writeHashSoon(); }
+  requestRender();
+}
+function cycleSet() {
+  if (S.sets.length < 2) return;
+  const i = S.sets.findIndex((t) => t.key === S.set);
+  useSet(S.sets[(i + 1) % S.sets.length].key);
+}
+function buildTrackingSeg() {
+  const seg = $('trkSeg');
+  seg.textContent = '';
+  seg.hidden = S.sets.length < 2;
+  for (const t of S.sets) {
+    const b = document.createElement('button');
+    b.dataset.set = t.key; b.textContent = t.label;
+    b.title = `${t.note || t.label} (T)`;
+    b.setAttribute('aria-pressed', String(t.key === S.set));
+    b.addEventListener('click', () => useSet(t.key));
+    seg.appendChild(b);
+  }
+}
 
 // ---------------------------------------------------------------------------- the stage: overlay + pitch
 function project(H, o, xm, ym) {
@@ -377,9 +425,12 @@ function drawOverlay() {
   }
   const b = ballAt(f);
   if (b) {
+    const src = ballSource(f);                       // a filled ball: dashed, amber when the model drew it
     const [u, w] = project(v.hom, o, b[0], b[1]);
     ctx.beginPath(); ctx.arc(u * s, w * s, r + 2, 0, 7);
-    ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.strokeStyle = src === 2 ? COL.diff : '#fff'; ctx.lineWidth = 2;
+    if (src) ctx.setLineDash([4, 3]);
+    ctx.stroke(); ctx.setLineDash([]);
   }
 }
 
@@ -455,7 +506,15 @@ function drawPitch() {
     ctx.strokeStyle = '#000'; ctx.stroke();
   }
   const b = ballAt(f);
-  if (b) {
+  const src = ballSource(f);
+  if (b && src) {                                     // filled, not tracked: a ring, amber for the model
+    const [u, v] = toScreen(g, b[0], b[1]);
+    const col = src === 2 ? COL.diff : '#d9d9d9';
+    ctx.beginPath(); ctx.arc(u, v, r * 0.75, 0, 7); ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fill();
+    ctx.setLineDash([3, 2]); ctx.lineWidth = 2; ctx.strokeStyle = col; ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = col; ctx.font = '12px Inter, "Segoe UI", sans-serif';
+    ctx.fillText(src === 2 ? 'model' : 'interpolated', u + r + 4, v + 4);
+  } else if (b) {
     const [u, v] = toScreen(g, b[0], b[1]);
     ctx.beginPath(); ctx.arc(u, v, r * 0.62, 0, 7); ctx.fillStyle = '#fff'; ctx.fill();
     ctx.strokeStyle = '#000'; ctx.stroke();
@@ -739,9 +798,14 @@ function renderRail() {
   if (!S.lanes.length) { const li = document.createElement('li'); li.className = 'muted'; li.textContent = 'No lanes loaded.'; list.appendChild(li); }
 
   // tracking here
-  const b = ballAt(f);
-  if (b) $('trkBall').textContent = 'Tracked';
-  else { const lb = lastBall(f, 60 * S.fps); $('trkBall').textContent = lb ? `Lost for ${fmtDur(lb.ago)}` : 'Not tracked'; }
+  const cur = S.sets.find((t) => t.key === S.set);
+  $('trkSet').textContent = cur ? cur.label : 'Original';
+  $('trkSet').title = cur ? cur.note : '';
+  const b = ballAt(f), src = ballSource(f), bEl = $('trkBall');
+  bEl.classList.toggle('imputed', !!(b && src));
+  if (b && src) bEl.textContent = `${BALL_SRC[src]} · gap ${fmtDur(gapAround(f))}`;
+  else if (b) bEl.textContent = 'Tracked';
+  else { const lb = lastBall(f, 60 * S.fps); bEl.textContent = lb ? `Lost for ${fmtDur(lb.ago)}` : 'Not tracked'; }
   let h = 0, a = 0;
   for (let k = 0; k < S.slots; k++) if (px(f, k) !== MISSING) (S.team[k] === 0 ? h++ : a++);
   $('trkHome').textContent = h;
@@ -1008,6 +1072,7 @@ function bindControls() {
     else if (k === '2') setView('broadcast');
     else if (k === '3') setView('pitch');
     else if (k === 'o' || k === 'O') { $('optOverlay').click(); }
+    else if (k === 't' || k === 'T') cycleSet();
     else if (k === '+' || k === '=') zoomLens(-1);
     else if (k === '-' || k === '_') zoomLens(1);
     else if (k === '?') $('helpBtn').click();
@@ -1043,6 +1108,8 @@ function buildLegend() {
   $('trkAwayName').textContent = `${shortTeam(S.meta.away)} players`;
   bindTimeline();
   const h = readHash();
+  useSet(h.t && S.sets.some((t) => t.key === h.t) ? h.t : store.get(`set.${S.meta.key}`, 'original'), false);
+  buildTrackingSeg();
   const labelled = truthLabelled();
   S.frame = Number.isFinite(h.f) ? Math.max(0, Math.min(S.n - 1, h.f)) : labelled ? labelled[0] : (S.meta.halves[0]?.[1] ?? 0);
   const firstView = h.v && ['tactical', 'broadcast', 'pitch'].includes(h.v) ? h.v

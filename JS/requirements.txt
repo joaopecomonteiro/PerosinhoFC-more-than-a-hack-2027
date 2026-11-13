@@ -2,3 +2,4 @@
 # byte-identical file (make reproduce). Python 3.12-3.13.
 numpy==2.5.3
 pandas==3.0.5
+scikit-learn==1.9.1   # mqf.dead (learned P(dead)); the pickled model needs this exact version

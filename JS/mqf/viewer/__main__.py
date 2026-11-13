@@ -6,6 +6,12 @@
     python -m mqf.viewer --synthetic                   # synthetic match (try: python -m mqf.viewer.demo)
     python -m mqf.viewer --no-broadcast                # skip the broadcast feed and its sync
     python -m mqf.viewer --resync                      # recompute the broadcast sync
+    python -m mqf.viewer --no-fixed                    # only the tracking as delivered
+    python -m mqf.viewer --fixed-device cpu            # where the ball model runs (default: GPU if any)
+
+Tracking switch (top bar, key T): Original = as delivered; Fixed = our cleaned tracklets
+(mqf.tracks) + the missing ball filled with the frozen setting (mqf.ball.impute.FROZEN). The
+fixed set is computed once on this machine and cached in cache/viewer.
 
 The page runs in your browser from a server bound to 127.0.0.1. More model lanes can be dropped
 onto the page as frame,label CSVs.
@@ -29,6 +35,10 @@ def main(argv=None):
     ap.add_argument("--synthetic", action="store_true", help="the synthetic match instead of BAR-ATH")
     ap.add_argument("--no-broadcast", action="store_true", help="skip the broadcast feed and its sync")
     ap.add_argument("--resync", action="store_true", help="recompute the broadcast sync")
+    ap.add_argument("--no-fixed", action="store_true", help="skip the cleaned / ball-filled tracking")
+    ap.add_argument("--fixed-model", type=Path, default=None, help="ball model (default: models/<FROZEN model>)")
+    ap.add_argument("--fixed-device", default="auto", help="auto | cuda | cpu")
+    ap.add_argument("--refix", action="store_true", help="recompute the fixed tracking (ignore its cache)")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
     args = ap.parse_args(argv)
@@ -38,10 +48,13 @@ def main(argv=None):
     def log(msg: str):
         print(f"[{time.time() - t0:5.1f} s] {msg}", flush=True)
 
+    fixed = None if args.no_fixed else {"model_path": args.fixed_model, "device": args.fixed_device,
+                                        "force": args.refix}
     if args.synthetic:
-        g = G.synthetic_game(args.pred, None if args.gt == "public" else args.gt, args.resync, log)
+        g = G.synthetic_game(args.pred, None if args.gt == "public" else args.gt, args.resync, log, fixed=fixed)
     else:
-        g = G.competition(args.pred, args.gt, broadcast=not args.no_broadcast, resync=args.resync, log=log)
+        g = G.competition(args.pred, args.gt, broadcast=not args.no_broadcast, resync=args.resync, log=log,
+                          fixed=fixed)
     meta, blobs = G.bundle(g)
 
     log(f"{g.title}: {g.n_frames:,} frames, lanes: " + (", ".join(l.name for l in g.lanes) or "none"))

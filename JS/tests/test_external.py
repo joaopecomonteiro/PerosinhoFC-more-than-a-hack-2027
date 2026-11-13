@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import pandas as pd
 
 from mqf import atd
@@ -128,3 +129,72 @@ def test_splits_by_game():
     assert sorted(lg[g.split("-")[1]] for g in s["sources"]["idsse"]["val"]) == ["2. Bundesliga", "Bundesliga"]
     assert not s["sources"]["skillcorner"]["train_ok"]
     assert not any(g.startswith("SKC-") for g in splits.games("train", train_ok_only=True))
+
+
+# ------------------------------------------------------------------------------------ PFF
+
+def _pff_file(path):
+    """A tiny PFF-shaped game: 2 periods, kick-off, passes, an OUT with a restart, END."""
+    import bz2
+    import json as _json
+    rows = []
+
+    def frame(fn, period, ge=None, ball=(0.0, 0.0), vis="VISIBLE", dup=False):
+        r = {"frameNum": fn, "period": period, "videoTimeMs": fn * 1000 / 29.97, "game_event_id": None,
+             "homePlayers": [{"jerseyNum": str(j), "confidence": "LOW", "visibility": "ESTIMATED",
+                              "x": -10.0 + j, "y": 1.0 * j} for j in (1, 4, 9)],
+             "awayPlayers": [{"jerseyNum": str(j), "confidence": "HIGH", "visibility": "VISIBLE",
+                              "x": 10.0 + j, "y": -1.0 * j} for j in (1, 7)],
+             "balls": [] if ball is None else [{"visibility": vis, "x": ball[0], "y": ball[1], "z": 0.0}]}
+        if ge:
+            r["game_event_id"], r["game_event"] = ge["id"], ge
+        rows.append(r)
+        if dup:
+            rows.append(dict(r))
+
+    def ev(i, typ, start, end, home):
+        return {"id": i, "game_event_type": typ, "start_frame": start, "end_frame": end, "home_team": home,
+                "home_ball": home, "team_name": "Home FC" if home else "Away FC"}
+    events = {100: ev(1, "FIRSTKICKOFF", 100, 100, 1), 130: ev(2, "OTB", 130, 140, 0),
+              200: ev(3, "OUT", 200, 200, 0), 260: ev(4, "OTB", 260, 270, 1), 390: ev(5, "END", 390, 390, 0),
+              500: ev(6, "SECONDKICKOFF", 500, 500, 0), 560: ev(7, "OTB", 560, 565, 1)}
+    for fn in list(range(100, 400)) + list(range(500, 700)):
+        period = 1 if fn < 450 else 2
+        ge = next((e for s, e in events.items() if s <= fn <= e["end_frame"]), None)
+        ball = None if 300 <= fn < 310 else (float(fn % 30), 2.0)
+        vis = "ESTIMATED" if 320 <= fn < 330 else "VISIBLE"
+        frame(fn, period, ge, ball, vis, dup=(fn == 150))
+    with bz2.open(path, "wt", encoding="utf-8") as fh:
+        for r in rows:
+            fh.write(_json.dumps(r) + "\n")
+
+
+def test_pff_conversion_and_labels(tmp_path):
+    from mqf.external import bundle, pff
+    _pff_file(tmp_path / "999.jsonl.bz2")
+    m = pff.load_match(999, root=tmp_path)
+    assert m["fps"] == pytest.approx(29.97, abs=0.01) and m["halves"] == ((1, 100, 399), (2, 500, 699))
+    lab = m["labels"]
+    assert (lab[:100] == "X").all() and (lab[400:500] == "X").all()
+    assert (lab[100:130] == "H").all() and (lab[130:200] == "A").all()        # owner = player in control
+    assert (lab[200:260] == "D").all() and (lab[260:390] == "H").all()        # OUT -> restart, then END
+    assert (lab[390:400] == "D").all() and (lab[500:560] == "A").all() and (lab[560:700] == "H").all()
+    assert m["home"] == "Home FC" and m["away"] == "Away FC"
+    P = m["players"]
+    assert P.shape == (700, 5, 2) and list(m["team_of_player"]) == [0, 0, 0, 1, 1]
+    np.testing.assert_allclose(P[150, 0], [-9.0 + 52.5, 1.0 + 34.0])          # centre origin -> corner
+    b = m["ball"]
+    assert np.isnan(b[300:310]).all() and np.isnan(b[320:330]).all() and not np.isnan(b[330]).any()
+    out = bundle.write_bundle(m, root=tmp_path / "bundles")
+    sp = bundle.spec(out)
+    assert sp.fps == pytest.approx(29.97, abs=0.01) and sp.n_frames == 700
+
+
+def test_pff_backup_gap_rule():
+    from mqf.external import pff
+    ev = [{"type": "FIRSTKICKOFF", "start": 0, "end": 0, "home_team": 1, "period": 1},
+          {"type": "OTB", "start": 10, "end": 20, "home_team": 1, "period": 1},
+          {"type": "OTB", "start": 20 + 30 * 15, "end": 500, "home_team": 0, "period": 1}]   # 15 s, no OUT
+    lab, st = pff.labels_from_events(600, ((1, 0, 599),), ev, 30.0)
+    assert st["backup_gaps"] == 1 and (lab[20:50] == "H").all() and (lab[50:470] == "D").all()
+    assert (lab[470:] == "A").all()

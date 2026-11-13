@@ -1,6 +1,7 @@
 """How much two submissions differ -- aggregates only, no frame numbers, no ground truth.
 
     python -m mqf.compare results/Perosinho_FC.csv results/clean.csv
+    python -m mqf.compare base_v0 ballfill_v5          # bare names are looked up in results/
 
 For a change whose value the harness cannot measure on the real match (e.g. track cleaning), this
 says how much it moves the output: share of graded frames that change, between which labels, how
@@ -11,11 +12,26 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
 from . import decode
+
+
+def resolve(arg: str, results_dir) -> Path:
+    """The submission a CLI argument means: the path as given, else results/<name>[.csv]. A missing
+    file is a clear message listing what results/ holds (file names only), never a traceback."""
+    from pathlib import Path
+    p = Path(arg)
+    for cand in (p, results_dir / p, results_dir / p.name, results_dir / f"{p.name}.csv"):
+        if cand.is_file():
+            return cand
+    have = sorted(f.name for f in results_dir.glob("*.csv")) if results_dir.is_dir() else []
+    raise SystemExit(f"no submission at {arg}.\n"
+                     f"CSVs in {results_dir}: {', '.join(have) if have else 'none'}\n"
+                     f"Build one with: python tasks.py submit --team <name>   (-> results/<name>.csv)")
 
 
 def _labels(path) -> np.ndarray:
@@ -60,10 +76,14 @@ def main(argv=None) -> int:
         from .config import SYNTHETIC_DIR
         from . import synthetic
         spec = synthetic.generate(SYNTHETIC_DIR)
+        results_dir = SYNTHETIC_DIR / "results"
     else:
-        from .config import competition_game
+        from .config import RESULTS_DIR, competition_game
         spec = competition_game()
-    r = compare(_labels(args.a), _labels(args.b), spec.halves, spec.fps)
+        results_dir = RESULTS_DIR
+    a, b = resolve(args.a, results_dir), resolve(args.b, results_dir)
+    print(f"a = {a.name}   b = {b.name}")
+    r = compare(_labels(a), _labels(b), spec.halves, spec.fps)
     print("=== mqf.compare -- aggregates only, safe to share ===")
     for k, v in r.items():
         print(f"{k}: {v}")
