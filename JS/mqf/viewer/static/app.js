@@ -17,7 +17,7 @@ const $ = (id) => document.getElementById(id);
 const S = {
   meta: null, fps: 25, n: 0, L: 105, W: 68,
   players: null, ball: null, slots: 0, team: null,
-  sets: [], set: 'original', ballSrc: null, origBall: null,   // tracking versions (Original / Fixed)
+  sets: [], set: 'original', ballSrc: null, origBall: null, flags: null,   // tracking versions (Original / Fixed)
   lanes: [], truth: -1, compare: -1,
   videos: {}, view: 'tactical',
   frame: 0, playing: false, rate: 1, lensSec: 30,
@@ -135,6 +135,7 @@ async function load() {
   for (const t of sets) {
     wanted.push(t.players, t.ball); sizes[t.players] = S.n * t.n_slots * 4; sizes[t.ball] = S.n * 4;
     if (t.ball_source) wanted.push(t.ball_source);
+    if (t.flags) { wanted.push(t.flags); sizes[t.flags] = S.n * t.n_slots; }
   }
   for (const v of meta.videos) for (const k of ['homography', 'to_match', 'from_match', 'state']) if (v[k]) wanted.push(v[k]);
   const total = wanted.reduce((a, k) => a + (sizes[k] || S.n), 0);
@@ -151,6 +152,7 @@ async function load() {
     key: t.key, label: t.label, note: t.note || '', slots: t.n_slots, team: Uint8Array.from(t.team_of_slot),
     players: new Int16Array(bufs[t.players]), ball: new Int16Array(bufs[t.ball]),
     src: t.ball_source ? new Uint8Array(bufs[t.ball_source]) : null,
+    flags: t.flags ? new Uint8Array(bufs[t.flags]) : null,
   }));
   S.origBall = S.sets[0].ball;
   useSet(S.sets[0].key, false);
@@ -358,6 +360,27 @@ function lastBall(f, maxBack) {
   return null;
 }
 const BALL_SRC = ['Tracked', 'Interpolated', 'Model', 'Not filled'];
+// what the cleaner did to a point of the Fixed set (mqf.tracks.FLAG_*): 1 team repaired,
+// 2 keeper takeover (Sigmar's rule), 3 keeper drawn at his saved place (not tracked)
+const FLAG = { team: 1, takeover: 2, fill: 3 };
+const flagAt = (f, k) => (S.flags ? S.flags[f * S.slots + k] : 0);
+function drawPlayer(ctx, u, v, r, k, fl) {
+  ctx.beginPath(); ctx.arc(u, v, r, 0, 7);
+  const col = S.team[k] === 0 ? COL.H : COL.A;
+  if (fl === FLAG.fill) {                            // not tracked: hollow, dashed, in the team colour
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fill();
+    ctx.setLineDash([3, 2]); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.stroke(); ctx.setLineDash([]);
+    ctx.lineWidth = 1.5;
+    return;
+  }
+  ctx.fillStyle = col; ctx.fill();
+  ctx.strokeStyle = '#000'; ctx.stroke();
+  if (fl === FLAG.team || fl === FLAG.takeover) {   // team repaired: a ring, amber for the keeper takeover
+    ctx.beginPath(); ctx.arc(u, v, r + 3, 0, 7);
+    ctx.strokeStyle = fl === FLAG.takeover ? COL.diff : '#fff'; ctx.lineWidth = 2; ctx.stroke();
+    ctx.lineWidth = 1.5;
+  }
+}
 function ballSource(f) { return S.ballSrc ? S.ballSrc[f] : 0; }
 function gapAround(f) {                    // length of the gap in the DELIVERED ball that frame f sits in
   const B = S.origBall, lim = 20 * 60 * S.fps;
@@ -370,6 +393,7 @@ function gapAround(f) {                    // length of the gap in the DELIVERED
 function useSet(key, persist = true) {
   const t = S.sets.find((x) => x.key === key) || S.sets[0];
   S.set = t.key; S.players = t.players; S.ball = t.ball; S.slots = t.slots; S.team = t.team; S.ballSrc = t.src;
+  S.flags = t.flags;
   document.querySelectorAll('#trkSeg button').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.set === t.key)));
   if (persist) { store.set(`set.${S.meta.key}`, t.key); writeHashSoon(); }
   requestRender();
@@ -419,9 +443,7 @@ function drawOverlay() {
     if (x === MISSING) continue;
     const [u, w] = project(v.hom, o, x / 100, py(f, k) / 100);
     if (!Number.isFinite(u)) continue;
-    ctx.beginPath(); ctx.arc(u * s, w * s, r, 0, 7);
-    ctx.fillStyle = S.team[k] === 0 ? COL.H : COL.A; ctx.fill();
-    ctx.strokeStyle = '#000'; ctx.stroke();
+    drawPlayer(ctx, u * s, w * s, r, k, flagAt(f, k));
   }
   const b = ballAt(f);
   if (b) {
@@ -501,9 +523,7 @@ function drawPitch() {
     const x = px(f, k);
     if (x === MISSING) continue;
     const [u, v] = toScreen(g, x / 100, py(f, k) / 100);
-    ctx.beginPath(); ctx.arc(u, v, r, 0, 7);
-    ctx.fillStyle = S.team[k] === 0 ? COL.H : COL.A; ctx.fill();
-    ctx.strokeStyle = '#000'; ctx.stroke();
+    drawPlayer(ctx, u, v, r, k, flagAt(f, k));
   }
   const b = ballAt(f);
   const src = ballSource(f);
@@ -806,10 +826,18 @@ function renderRail() {
   if (b && src) bEl.textContent = `${BALL_SRC[src]} · gap ${fmtDur(gapAround(f))}`;
   else if (b) bEl.textContent = 'Tracked';
   else { const lb = lastBall(f, 60 * S.fps); bEl.textContent = lb ? `Lost for ${fmtDur(lb.ago)}` : 'Not tracked'; }
-  let h = 0, a = 0;
-  for (let k = 0; k < S.slots; k++) if (px(f, k) !== MISSING) (S.team[k] === 0 ? h++ : a++);
+  let h = 0, a = 0, rep = 0, take = 0, fill = 0;
+  for (let k = 0; k < S.slots; k++) {
+    if (px(f, k) === MISSING) continue;
+    S.team[k] === 0 ? h++ : a++;
+    const fl = flagAt(f, k);
+    if (fl === FLAG.team) rep++; else if (fl === FLAG.takeover) take++; else if (fl === FLAG.fill) fill++;
+  }
   $('trkHome').textContent = h;
   $('trkAway').textContent = a;
+  $('trkFixRow').hidden = !S.flags;
+  $('trkFix').textContent = !S.flags ? '' : (rep + take + fill === 0 ? 'none'
+    : [rep && `${rep} team`, take && `${take} keeper takeover`, fill && `${fill} keeper at saved place`].filter(Boolean).join(' · '));
 
   // sync block
   const bv = S.videos.broadcast;
@@ -1088,6 +1116,13 @@ function buildLegend() {
   ul.textContent = '';
   for (const [c, name] of [[0, S.meta.home], [1, S.meta.away], [2, 'Dead ball'], [3, 'No label'], ['diff', 'Model disagrees with the truth']]) {
     const li = document.createElement('li'); li.append(sw(c), document.createTextNode(name)); ul.appendChild(li);
+  }
+  if (S.sets.some((t) => t.flags)) {                // Fixed only: what the cleaner repaired
+    for (const [cls, name] of [['ring-team', 'Fixed: team repaired'], ['ring-take', 'Fixed: keeper takeover'],
+                               ['ring-fill', 'Fixed: keeper at saved place']]) {
+      const li = document.createElement('li'); const r = document.createElement('span'); r.className = 'ring ' + cls;
+      li.append(r, document.createTextNode(name)); ul.appendChild(li);
+    }
   }
 }
 

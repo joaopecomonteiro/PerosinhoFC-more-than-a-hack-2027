@@ -57,7 +57,10 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
     clean_report = None
     if clean_tracks:
         from . import tracks
-        trk, clean_report = tracks.clean(trk, spec.fps, spec.pitch)
+        windows = None
+        if use_tags and spec.smart_tagging and Path(spec.smart_tagging).exists():
+            windows = smart_tagging.kickoff_windows(spec.smart_tagging, spec.fps, spec.n_frames)
+        trk, clean_report = tracks.clean(trk, spec.fps, spec.pitch, kickoff_windows=windows, halves=spec.halves)
     filled, fill_report = None, None
     if ball_fill:
         trk, filled, fill_report = fill_ball(trk, spec, ball_model)

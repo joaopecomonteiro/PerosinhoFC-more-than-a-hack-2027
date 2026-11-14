@@ -345,3 +345,9 @@ h1 { font-size: var(--fs-title); line-height: 24px; font-weight: 600; white-spac
 /* ------------------------------------------------------------------ tracking switch */
 #trkSeg button { min-width: 64px; }
 .kv dd.imputed { color: var(--diff, #e5a93b); }
+
+/* Fixed tracking: what the cleaner repaired (same marks as on the pitch) */
+.legend .ring { width: 10px; height: 10px; border-radius: 50%; box-sizing: border-box; display: inline-block; }
+.legend .ring-team { border: 2px solid #fff; }
+.legend .ring-take { border: 2px solid var(--diff, #e5a93b); }
+.legend .ring-fill { border: 2px dashed var(--muted, #8a8a8a); }

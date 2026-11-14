@@ -3,6 +3,8 @@
     python -m mqf.harness.run --source synthetic --seeds 0 1 2 --tag v0
     python -m mqf.harness.run --source idsse --matches all --seeds 0 1 --tag v0
     python -m mqf.harness.run --source idsse --noise jitter_corr_s=1.0 ball_burst_mean_s=3 --tag v0_robust
+    python -m mqf.harness.run --seeds 0 1 2 --clean-tracks --clean-cfg keeper_takeover=0 \
+        --noise team_flip_p=0.05 gk_team_flip_p=0.5 hold_lost_s=3 --tag takeover_off
 
 This is where model choices are made (never on the public 5 minutes). Results are aggregates on
 games that are not the competition match, written to harness_results/<tag>.json -- safe to share.
@@ -45,7 +47,11 @@ def main():
     ap.add_argument("--clean-tracks", action="store_true", help="team-level tracklet cleaning (mqf.tracks) before features")
     ap.add_argument("--noise", nargs="*", default=[], metavar="FIELD=VALUE",
                     help="override NoiseConfig assumptions, e.g. jitter_corr_s=1.0 (robustness checks)")
+    ap.add_argument("--clean-cfg", nargs="*", default=[], metavar="FIELD=VALUE",
+                    help="CleanConfig overrides for --clean-tracks, e.g. keeper_takeover=0")
     args = ap.parse_args()
+    from ..external.evaluate import parse_clean_cfg
+    clean_cfg = parse_clean_cfg(args.clean_cfg)
 
     default = NoiseConfig()
     over = dict(kv.split("=", 1) for kv in args.noise)
@@ -54,7 +60,8 @@ def main():
     for m in matches(args.source, args.matches):
         for s in args.seeds:
             cfg = replace(base, seed=s)
-            r = score(m["labels"], predict(m, params, cfg, clean_tracks=args.clean_tracks), m["fps"])
+            r = score(m["labels"], predict(m, params, cfg, clean_tracks=args.clean_tracks, clean_cfg=clean_cfg),
+                      m["fps"])
             rows.append({"match": m["name"], "noise_seed": s, **r})
             buckets = "  ".join(f"{k}:{v['match_rate']:.2f}(n={v['n']})" for k, v in r["by_length"].items()
                                 if v["match_rate"] is not None)
@@ -67,6 +74,7 @@ def main():
     HARNESS_DIR.mkdir(parents=True, exist_ok=True)
     out = HARNESS_DIR / f"{args.source}_{args.tag}.json"
     out.write_text(json.dumps({"params": asdict(params), "noise": asdict(base), "clean_tracks": args.clean_tracks,
+                               "clean_cfg": args.clean_cfg,
                                "mean_spellF1": float(sf.mean()), "mean_macroF1": float(mf.mean()),
                                "runs": rows}, indent=2, default=float))
     print(f"wrote {out}")

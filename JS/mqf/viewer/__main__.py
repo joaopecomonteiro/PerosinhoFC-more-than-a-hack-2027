@@ -8,10 +8,15 @@
     python -m mqf.viewer --resync                      # recompute the broadcast sync
     python -m mqf.viewer --no-fixed                    # only the tracking as delivered
     python -m mqf.viewer --fixed-device cpu            # where the ball model runs (default: GPU if any)
+    python -m mqf.viewer --fixed-cfg keeper_takeover_count_check=0   # Fixed with a cleaner rule changed
 
 Tracking switch (top bar, key T): Original = as delivered; Fixed = our cleaned tracklets
 (mqf.tracks) + the missing ball filled with the frozen setting (mqf.ball.impute.FROZEN). The
-fixed set is computed once on this machine and cached in cache/viewer.
+fixed set is computed once on this machine and cached in cache/viewer (recomputed whenever the
+cleaner's code changes). In Fixed, a white ring marks a player whose team the cleaner repaired, an
+amber ring a keeper takeover (a new track next to the other team's keeper given the keeper's team),
+a dashed circle the keeper drawn at his saved place; the startup log prints the counts
+("fixed tracking: vs Original: ...") -- aggregates, safe to paste.
 
 The page runs in your browser from a server bound to 127.0.0.1. More model lanes can be dropped
 onto the page as frame,label CSVs.
@@ -39,6 +44,8 @@ def main(argv=None):
     ap.add_argument("--fixed-model", type=Path, default=None, help="ball model (default: models/<FROZEN model>)")
     ap.add_argument("--fixed-device", default="auto", help="auto | cuda | cpu")
     ap.add_argument("--refix", action="store_true", help="recompute the fixed tracking (ignore its cache)")
+    ap.add_argument("--fixed-cfg", nargs="*", default=[], metavar="FIELD=VALUE",
+                    help="mqf.tracks.CleanConfig overrides for Fixed, e.g. keeper_takeover=0 (cached separately)")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
     args = ap.parse_args(argv)
@@ -48,8 +55,9 @@ def main(argv=None):
     def log(msg: str):
         print(f"[{time.time() - t0:5.1f} s] {msg}", flush=True)
 
+    from ..external.evaluate import parse_clean_cfg
     fixed = None if args.no_fixed else {"model_path": args.fixed_model, "device": args.fixed_device,
-                                        "force": args.refix}
+                                        "force": args.refix, "clean_cfg": parse_clean_cfg(args.fixed_cfg)}
     if args.synthetic:
         g = G.synthetic_game(args.pred, None if args.gt == "public" else args.gt, args.resync, log, fixed=fixed)
     else:

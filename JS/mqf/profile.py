@@ -355,7 +355,7 @@ def profile(spec: GameSpec, homography: Path | None = None, use_cache: bool = Tr
            "identity": profile_identity(trk, spec, graded)}
     if clean:
         from . import tracks
-        ctrk, report = tracks.clean(trk, spec.fps, spec.pitch)
+        ctrk, report = tracks.clean(trk, spec.fps, spec.pitch, halves=spec.halves)
         out["cleaning"] = report
         out["identity_after_cleaning"] = profile_identity(ctrk, spec, graded)
         out["tracking_after_cleaning"] = {k: v for k, v in profile_tracking(ctrk, spec, graded).items()

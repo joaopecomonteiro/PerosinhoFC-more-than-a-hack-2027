@@ -34,6 +34,14 @@ class NoiseConfig:
     ball_jitter_m: float = 0.4
     jitter_corr_s: float = 0.5           # assumption: tracker error is smooth, not white (AR(1) e-folding time)
     speed_window_s: float = 0.4          # assumption: tracker speed = centred difference over this span
+    team_flip_p: float = 0.0             # assumption, off by default: share of pickups (a player's tracklets
+                                         # after his first) that land in a slot of the OTHER team
+    gk_team_flip_p: float = 0.0          # the same for the two goalkeepers (a keeper's kit is neither team's)
+    hold_lost_s: float = 0.0             # assumption, off by default: when a tracklet ends, the tracker keeps
+                                         # repeating its last position this long (a held copy) -- the player
+                                         # may already be picked up again next to it. Vary it (1-5 s); never
+                                         # set it from the competition match
+    hold_lost_p: float = 1.0             # ... share of tracklet ends that are held (1 = every one: a stress test)
     seed: int = 0
 
 
@@ -106,6 +114,21 @@ def _segments_of(on: np.ndarray, break_p: float, rng):
     return out
 
 
+def goalkeepers(players: np.ndarray, team_of_player: np.ndarray) -> np.ndarray:
+    """Index of each team's keeper in clean tracking, without a roster: the player of that team most
+    often the deepest object at either end of the pitch."""
+    x = players[..., 0]
+    seen = ~np.isnan(x).all(axis=1)
+    extreme = np.zeros(players.shape[1])
+    if seen.any():
+        xs = x[seen]
+        np.add.at(extreme, np.nanargmin(xs, axis=1), 1)
+        np.add.at(extreme, np.nanargmax(xs, axis=1), 1)
+    team = np.asarray(team_of_player)
+    return np.array([int(np.flatnonzero(team == t)[np.argmax(extreme[team == t])]) for t in (0, 1)
+                     if (team == t).any()], dtype=np.int64)
+
+
 def corrupt(players: np.ndarray, team_of_player: np.ndarray, ball: np.ndarray,
             graded: np.ndarray, fps: int, cfg: NoiseConfig = NoiseConfig()) -> Tracking:
     """players (n, P, 2) metres with NaN off-pitch; team_of_player (P,) 0/1; ball (n, 2) metres."""
@@ -131,8 +154,19 @@ def corrupt(players: np.ndarray, team_of_player: np.ndarray, ball: np.ndarray,
     speed = np.full((n, n_slots), np.nan, dtype=np.float32)
     busy_until = np.zeros(n_slots, dtype=np.int64)
     team_of_slot = np.repeat(np.array([0, 1], dtype=np.int8), cfg.slots_per_team)
+    flip_p = np.zeros(P)
+    if cfg.team_flip_p > 0 or cfg.gk_team_flip_p > 0:       # own stream: the default noise stays unchanged
+        flip_p[:] = cfg.team_flip_p
+        flip_p[goalkeepers(players, team_of_player)] = cfg.gk_team_flip_p
+    frng = np.random.default_rng([cfg.seed, 7])
+    seen = np.zeros(P, dtype=bool)
+    hold = int(round(cfg.hold_lost_s * fps))
+    hrng = np.random.default_rng([cfg.seed, 11])            # own stream: the other noise stays unchanged
     for s, e, p in pieces:
         team = int(team_of_player[p])
+        if seen[p] and flip_p[p] > 0 and frng.random() < flip_p[p]:
+            team = 1 - team                                # picked up again, classified as the other team
+        seen[p] = True
         free = np.flatnonzero((team_of_slot == team) & (busy_until <= s))
         if not len(free):
             continue                                       # tracker has no slot: player unseen
@@ -140,6 +174,11 @@ def corrupt(players: np.ndarray, team_of_player: np.ndarray, ball: np.ndarray,
         xy[s:e, k] = pl[s:e, p]
         speed[s:e, k] = pl_speed[s:e, p]
         busy_until[k] = e
+        if hold > 0 and e < n and hrng.random() < cfg.hold_lost_p:   # held copy: same place, exactly, speed 0
+            h = min(n, e + hold)
+            xy[e:h, k] = pl[e - 1, p]
+            speed[e:h, k] = 0.0
+            busy_until[k] = h
 
     # duplicates: a second track on an existing player for a short while
     n_dup = rng.poisson(cfg.duplicate_per_min * n / (60.0 * fps))

@@ -72,6 +72,7 @@ class TrackingSet:
     ball: np.ndarray           # (n, 2) metres
     ball_source: np.ndarray | None = None   # (n,) uint8: 0 tracked, 1 interpolated, 2 model, 3 empty
     note: str = ""
+    flags: np.ndarray | None = None         # (n, slots) uint8 tracks.FLAG_*: what the cleaner did to each point
 
 
 @dataclass
@@ -223,7 +224,11 @@ def _fixed(trk, spec, fixed, log) -> list[TrackingSet]:
         return []
     from .fixed import fixed_tracking
     try:
-        return [fixed_tracking(trk, spec.fps, spec.pitch, spec.halves, log=log, **fixed)]
+        windows = None
+        if getattr(spec, "smart_tagging", None) and Path(spec.smart_tagging).is_file():
+            from ..smart_tagging import kickoff_windows
+            windows = kickoff_windows(spec.smart_tagging, spec.fps, spec.n_frames)
+        return [fixed_tracking(trk, spec.fps, spec.pitch, spec.halves, log=log, kickoff_windows=windows, **fixed)]
     except Exception as e:                       # the viewer must open even if this fails
         log(f"fixed tracking skipped: {type(e).__name__}: {e}")
         return []
@@ -349,13 +354,17 @@ def bundle(game: ViewerGame) -> tuple[dict, dict[str, bytes]]:
                 entry[name] = f"{name}_{v.key}"
         videos.append(entry)
     tracking = [{"key": "original", "label": "Original", "players": "players", "ball": "ball", "ball_source": None,
+                 "flags": None,
                  "n_slots": int(game.players.shape[1]), "team_of_slot": game.team_of_slot.astype(int).tolist(),
                  "note": "As delivered"}]
     for t in game.extra_tracking:
         entry = {"key": t.key, "label": t.label, "players": f"players_{t.key}", "ball": f"ball_{t.key}",
-                 "ball_source": None, "n_slots": int(t.players.shape[1]),
+                 "ball_source": None, "flags": None, "n_slots": int(t.players.shape[1]),
                  "team_of_slot": np.asarray(t.team_of_slot).astype(int).tolist(), "note": t.note}
         blobs[entry["players"]], blobs[entry["ball"]] = _cm(t.players), _cm(t.ball)
+        if t.flags is not None and np.shape(t.flags) == t.players.shape[:2]:
+            entry["flags"] = f"flags_{t.key}"
+            blobs[entry["flags"]] = np.ascontiguousarray(t.flags, dtype=np.uint8).tobytes()
         if t.ball_source is not None:
             entry["ball_source"] = f"ballsrc_{t.key}"
             blobs[entry["ball_source"]] = np.asarray(t.ball_source, dtype=np.uint8).tobytes()

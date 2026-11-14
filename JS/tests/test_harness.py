@@ -1,6 +1,7 @@
 """Noise model against the published numbers, harness scoring, IDSSE conversion (toy objects)."""
 from __future__ import annotations
 
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -69,3 +70,48 @@ def test_idsse_local_files(tmp_path):
     pos, info = idsse.raw_files("J03WMX", tmp_path)
     assert "positions" in pos.name and "matchinformation" in info.name
     assert idsse.raw_files("J03WN1", tmp_path) is None
+
+
+def _toy_with_keepers(n=3000):
+    rng = np.random.default_rng(3)
+    outfield = rng.uniform([25, 5], [80, 63], (20, 2))
+    base = np.concatenate([[[2.0, 34.0]], outfield[:10], [[103.0, 34.0]], outfield[10:]])   # keepers: index 0 and 11
+    players = base[None] + np.cumsum(rng.normal(0, 0.05, (n, 22, 2)), axis=0)
+    team = np.r_[np.zeros(11, int), np.ones(11, int)]
+    ball = np.tile([52.0, 34.0], (n, 1))
+    return players, team, ball
+
+
+def test_goalkeepers_found_without_a_roster():
+    players, team, _ = _toy_with_keepers()
+    assert sorted(noise.goalkeepers(players, team).tolist()) == [0, 11]
+
+
+def test_keeper_team_flips_only_move_pickups_to_the_other_team():
+    players, team, ball = _toy_with_keepers()
+    graded = np.ones(len(ball), dtype=bool)
+    base = noise.NoiseConfig(seed=0, track_break_per_min=6.0)
+    a = noise.corrupt(players, team, ball, graded, 25, base)
+    b = noise.corrupt(players, team, ball, graded, 25, replace(base, gk_team_flip_p=1.0))
+    pts = lambda t: np.sort(t.players[~np.isnan(t.players[..., 0])].ravel())
+    np.testing.assert_array_equal(pts(a), pts(b))                     # same points, only their slots/teams differ
+    near_goal = lambda t, tm: np.nansum((t.players[:, t.team_of_slot == tm, 0] < 6))
+    assert near_goal(a, 1) == 0 and near_goal(b, 1) > 0               # the home keeper now also sits in away slots
+    assert near_goal(b, 0) > 0                                        # ... but his first tracklet is still home
+
+
+def test_hold_lost_repeats_the_last_place_and_is_off_by_default():
+    import numpy as np
+    from mqf import synthetic
+    from mqf.harness.noise import NoiseConfig, corrupt
+    m = synthetic.clean_match(n_frames=6_000, seed=5, halves=((1, 200, 5_799),))
+    g = m["labels"] != "X"
+    a = corrupt(m["players"], m["team_of_player"], m["ball"], g, m["fps"], NoiseConfig(seed=1))
+    b = corrupt(m["players"], m["team_of_player"], m["ball"], g, m["fps"], NoiseConfig(seed=1, hold_lost_s=0.0, hold_lost_p=0.3))
+    np.testing.assert_array_equal(np.nan_to_num(a.players, nan=-1), np.nan_to_num(b.players, nan=-1))
+    h = corrupt(m["players"], m["team_of_player"], m["ball"], g, m["fps"], NoiseConfig(seed=1, hold_lost_s=2.0))
+    step = np.linalg.norm(np.diff(h.players, axis=0), axis=-1)
+    exact = np.nan_to_num(step, nan=np.inf) < 1e-6
+    base = (np.nan_to_num(np.linalg.norm(np.diff(a.players, axis=0), axis=-1), nan=np.inf) < 1e-6).sum()
+    assert exact.sum() > 100 * max(base, 1)                                       # held copies only with the knob on
+    assert np.nanmax(h.player_speed[1:][exact]) == 0.0                           # a held copy reports no speed

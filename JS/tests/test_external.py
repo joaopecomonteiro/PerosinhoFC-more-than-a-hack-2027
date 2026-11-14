@@ -198,3 +198,22 @@ def test_pff_backup_gap_rule():
     lab, st = pff.labels_from_events(600, ((1, 0, 599),), ev, 30.0)
     assert st["backup_gaps"] == 1 and (lab[20:50] == "H").all() and (lab[50:470] == "D").all()
     assert (lab[470:] == "A").all()
+
+
+def test_evaluate_load_with_atd_noise_and_clean_cfg(tmp_path):
+    from mqf.external import evaluate
+    from mqf.harness.noise import NoiseConfig
+    m = _toy_match(n=1500, P=22)
+    m["team_of_player"] = np.r_[np.zeros(11), np.ones(11)].astype(np.int8)
+    m["labels"] = np.array(["X"] * 50 + ["H"] * 700 + ["A"] * 700 + ["X"] * 50)
+    m["halves"] = ((1, 50, 1449),)
+    d = bundle.write_bundle(m, tmp_path)
+    spec, trk, gt = evaluate.load(d, noise_cfg=NoiseConfig(seed=0), clean_tracks=True,
+                                  clean_cfg=evaluate.parse_clean_cfg(["inherit_team=0", "fast_windows_s="]))
+    assert spec.n_frames == 1500 and len(gt) == 1500
+    assert trk.players.shape[0] == 1500 and np.isnan(trk.ball[:, 0]).mean() > 0.2      # ball loss applied
+    cfg = evaluate.parse_clean_cfg(["inherit_team=0", "fast_windows_s=", "kickoff_still_s=0.2"])
+    assert cfg.inherit_team is False and cfg.fast_windows_s == () and cfg.kickoff_still_s == 0.2
+    assert evaluate.parse_noise(["gk_team_flip_p=0.5"]).gk_team_flip_p == 0.5
+    with pytest.raises(SystemExit):
+        evaluate.parse_clean_cfg(["no_such_field=1"])

@@ -16,12 +16,14 @@ from .noise import NoiseConfig, corrupt
 LENGTH_BUCKETS_S = (0, 3, 10, 30, np.inf)
 
 
-def predict(match: dict, params: decode.Params, cfg: NoiseConfig, clean_tracks: bool = False) -> np.ndarray:
+def predict(match: dict, params: decode.Params, cfg: NoiseConfig, clean_tracks: bool = False,
+            clean_cfg=None) -> np.ndarray:
     trk = corrupt(match["players"], match["team_of_player"], match["ball"],
                   match["labels"] != "X", match["fps"], cfg)
     if clean_tracks:
         from .. import tracks
-        trk, _ = tracks.clean(trk, match["fps"], match["pitch"])
+        trk, _ = tracks.clean(trk, match["fps"], match["pitch"], clean_cfg or tracks.CleanConfig(),
+                              halves=match["halves"])
     feat = features.build(trk, match["pitch"], match["fps"])
     return decode.decode(feat, match["halves"], len(match["labels"]), params, tags=None)
 

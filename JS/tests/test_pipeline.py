@@ -84,12 +84,16 @@ def test_compare_two_submissions(syn_spec, syn_submission, tmp_path):
     assert r["changed_stretches"]["n"] >= 1 and 0 < r["graded_frames_changed"] < 0.01
 
 
-def test_compare_resolves_names_and_reports_missing(tmp_path):
+def test_compare_resolves_names_and_reports_missing(tmp_path, monkeypatch):
     import pytest
     from mqf import compare
-    (tmp_path / "base_v0.csv").write_text("frame,label\n0,H\n")
-    assert compare.resolve("base_v0", tmp_path) == tmp_path / "base_v0.csv"
-    assert compare.resolve("results/base_v0.csv", tmp_path) == tmp_path / "base_v0.csv"
+    res = tmp_path / "res"
+    res.mkdir()
+    (tmp_path / "cwd").mkdir()
+    monkeypatch.chdir(tmp_path / "cwd")          # relative paths must not hit the real results/ next to JS/
+    (res / "base_v0.csv").write_text("frame,label\n0,H\n")
+    assert compare.resolve("base_v0", res) == res / "base_v0.csv"
+    assert compare.resolve("results/base_v0.csv", res) == res / "base_v0.csv"
     with pytest.raises(SystemExit) as e:
-        compare.resolve("results/Perosinho_FC.csv", tmp_path)
+        compare.resolve("results/Perosinho_FC.csv", res)
     assert "base_v0.csv" in str(e.value) and "tasks.py submit" in str(e.value)

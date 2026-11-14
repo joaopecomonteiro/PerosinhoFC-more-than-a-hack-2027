@@ -32,6 +32,68 @@ than a sprinter. The cleaner (thresholds from football knowledge, none fitted to
    never inside a penalty area) while its team moves, then one next to a team-mate, then the newest;
 4. recomputes speeds from positions, never across a cut.
 It keeps 97.8 % of the tracked points and removes the excess (players per graded frame 20.5 → 20.2).
+v4 also checks the speed limit over 0.2 s and 1 s windows (a track sliding onto another player in
+steps under the one-frame limit is hidden there and cut) and repairs the TEAM of a track — the ATD
+gives a team per slot from kit classification, a player picked up again gets a new slot, and the
+goalkeeper, whose kit is neither team's, is where we saw it go wrong:
+5. at a kickoff every player is in his own half (Law 8). Evidence of a kickoff: the ball seen lying on
+   the centre spot, or — because this tracker usually loses a ball that lies still — a kickoff tagged
+   by Smart Tagging (automatic, ±3 s). Within it, the players must hold a kickoff shape for ≥ 1 s (a
+   player at the spot, each team's median in its own half, ≤ 4 players in the centre circle, ≥ 80 %
+   of the others in their team's half, median player < 1.5 m/s). A track that stays more than 2 m
+   inside the other half, outside the circle, over the wait gets the other team (≤ 2 per kickoff), but
+   only a team that is short of 11 at that moment and only if the player counts agree over the whole
+   life of that track, as for every other team change — otherwise it is an official or a lean.
+   The shape alone is not enough: a slow build-up against a mid-block looks the same, and without
+   the ball or a tag the check flipped real players on other games;
+6. a new track that starts where exactly one track ended ≤ 2 s earlier (within 10.5 m/s × gap, at most
+   5 m, + 1 m) or stands frozen (a held copy) takes that track's team; with nobody like that, a track
+   that vanished up to 30 s earlier within 2 m of the new one — its saved last place, e.g. a keeper
+   standing unseen — counts too. Conditions: the old track lived ≥ 2 s, nobody else is within 3 m
+   (never in a duel), and the player counts agree: over the new track's life its label must give its
+   team ≥ 1.5 more players than usual against the other (a wrong-team track adds one there and takes
+   one away). A held copy is hidden only while it stays frozen and its pickup is there; if the
+   pickup ends first, the saved place shows again and can be claimed by the next pickup. Repairs
+   carry forward from pickup to pickup.
+7a. v4g, Sigmar's keeper rule: which goal a team defends is counted once per half — over the first
+   60 s of the half the team with more players left of the halfway line defends x = 0 for the whole
+   half (Law 8) — instead of the smoothed medians. A new track in a penalty area with no MOVING track
+   within 3 m and nearer the goal than every moving player is the defending side's keeper, whatever
+   its colour and without the player-count check: when the keeper is picked up in the other team's
+   colour while that team's own keeper is lost, the counts read even (EXPERIMENTS #31–#32). Tracks that
+   do not move (frozen ≥ 0.4 s, or the tracker repeating a lost player's place) are no players here and
+   are hidden while they stay still. One guard: it must stay in that box on ≥ 50 % of its life.
+7. goalkeepers (one per team, in his own penalty area; which goal a team defends comes from the two
+   teams' medians smoothed over 60 s, as at the kickoff): a track that appears alone (nobody within
+   3 m) in a penalty area and deeper than every other player is that goal's keeper and gets the
+   defending team, if the player counts agree that this team is the one short of a player (without
+   that check the rule turned Barça attackers alone in Athletic's box into Athletic keepers: away over
+   11 twice as often, EXPERIMENTS #26); and while a team is short of 11 with nobody of its own in its penalty area (play
+   on), one more lane shows its keeper at his saved last place — where he was last seen as the
+   deepest of all players, for at most 10 s; never seen yet in this half: the 6-yard line. One keeper,
+   however many players are missing. The added point has no speed, so speed features ignore it.
+8. keeper takeover (v4d, Sigmar's rule), only for a pickup that rules 6–7 leave undecided: a new
+   track within 3 m of the OTHER team's goalkeeper is that keeper. The keeper is that team's track last
+   seen as the deepest of all players in its own penalty area within the last 10 s (the same definition
+   as the keeper fill). If he is still tracked (v4e), appearing next to him is enough: the new track
+   takes his team and his old track is hidden while it is held (it repeats its place exactly: this
+   tracker holds a lost player ~3 s) or still within 3 m of the new one — it shows again if they
+   separate. (v4d asked the new track to sit on his held copy or within 1 m of him on every shared
+   frame; in the viewer that left tracks of the other colour standing next to a tracked keeper.) If
+   he is gone, his saved last place counts. In every case the player counts must agree, as for every
+   team change: a real attacker next to a live keeper leaves the counts even (11 v 11) and is left
+   alone; a second track on the keeper gives his team one too few and the other one too many.
+   The counts can be fooled by other players the tracker misses at the same time, so when they are
+   ambiguous (v4f) the new track's behaviour decides: in the keeper's penalty area and deeper than
+   every other player (within 0.5 m) on ≥ 80 % of its life, over ≥ 2 s, it is the keeper — an
+   outfield player that deep for that long would be offside (Law 11); an attacker who touches the
+   keeper and leaves is not. A live keeper deeper than the new track counts against it; only his
+   held copy is left out. Why: rules 6–7 need the new track alone, and the keeper's own held copy
+   right next to it made it never alone, so in the viewer Fixed looked like Original exactly there.
+On other games with ATD noise (EXPERIMENTS #21) the repair changes nothing measurable when no track has
+the wrong team (spellF1 Δ +0.0001), and with simulated wrong-team pickups (an assumption: 5 % of
+pickups, half of the keeper's) it recovers +0.008 ± 0.003 of the −0.060 they cost. Without the count
+check it broke as many tracks as it fixed.
 **Missing ball (`mqf/ball/`; not in the submission yet, kept for the possession models).** Filled only while the ball is in play. Three
 tactics compared on the validation games of other teams: interpolation (linear / Hermite), a
 bidirectional transformer trained on IDSSE + Metrica with masked ball spans (A: per-frame set

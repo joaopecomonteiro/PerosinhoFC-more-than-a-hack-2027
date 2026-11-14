@@ -78,3 +78,16 @@ def evidence(path: Path, meta_path: Path, n_frames: int, fps: int) -> TagEvidenc
         elif ev["code"] in DEFENDING:
             vote[s:e, 1 - side] += 1.0
     return TagEvidence(vote, restart, restart_team)
+
+
+def kickoff_windows(path: Path, fps: int, n_frames: int) -> list[tuple[int, int]]:
+    """[(first, last)] frames of the tagged kickoffs (Type "Kick Off (Start)" / "Kick Off (After Goal)").
+    Windows open ~3.5 s before the restart and contain it; the instant comes from tracking."""
+    out = []
+    for ev in load_instances(path, fps):
+        if ev["tags"].get("type", "").strip().lower().startswith("kick off"):
+            a, b = max(0, ev["start"]), min(n_frames - 1, ev["end"])
+            if b >= a:
+                out.append((a, b))
+    return sorted(out)
+

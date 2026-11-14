@@ -229,7 +229,7 @@ def main(argv=None) -> int:
     spec = competition_game()
     trk = atd.load(spec)
     if not args.no_clean_tracks:
-        trk, _ = tracks.clean(trk, spec.fps, spec.pitch)
+        trk, _ = tracks.clean(trk, spec.fps, spec.pitch, halves=spec.halves)
     model = cfg = None
     if args.method in ("model", "hybrid"):
         if not args.model:
