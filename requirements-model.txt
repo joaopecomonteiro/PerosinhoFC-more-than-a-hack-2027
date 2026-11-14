@@ -1,4 +1,4 @@
-# Ball imputation model (mqf/ball). Easiest, from JS/ with the venv active:
+# Ball imputation model (mqf/ball). Easiest, from the repo root with the venv active:
 #   python tasks.py install-torch            # CUDA 13.2 build of torch 2.15.0 + this file, into the venv
 # torch is NOT pinned from PyPI on purpose: the PyPI wheel for Windows is CPU-only, and pip would swap
 # your CUDA build for it. A venv made by uv has no pip, and a bare `pip` may then be conda's. By hand:

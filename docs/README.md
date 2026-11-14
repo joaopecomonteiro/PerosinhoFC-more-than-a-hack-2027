@@ -10,17 +10,16 @@ three-state hidden Markov model per half. Approach: [TECHNICAL.md](TECHNICAL.md)
 
 ## Where the code lives
 
-This folder (`JS/`) sits inside our fork of the official repo. `mqf/config.py` detects that layout:
-the match bundle is read from the fork's `data/`, other games from the fork's `external_data/`,
-and the official code we import and score with is a **pinned** clone in `JS/vendor/mtah2027`
-(`python bootstrap.py`) — never the fork's own copies, so a merge from upstream can't change the
-scorer under us (`python bootstrap.py --status` reports drift). Everything we generate
-(`cache/`, `results/`, `reports/`, `vendor/`, `external/`, `synthetic_data/`) stays inside `JS/`
-and is gitignored by `JS/.gitignore`.
+Our code sits at the top of this repo, next to the official files it was forked from
+(`games.py`, `evaluation/`, the `*.md` rules). The match bundle is read from `data/`, other games
+from `external_data/`, and the official code we import and score with is a **pinned** clone in
+`vendor/mtah2027` (`python bootstrap.py`) — never the copies at the root, so a merge from upstream
+can't change the scorer under us. Everything we generate (`cache/`, `results/`, `reports/`,
+`vendor/`, `external/`, `synthetic_data/`) is gitignored.
 
 Dependencies stay in `requirements*.txt` (the single source of pins); uv, when installed, is only
-used as a faster venv/pip — no `uv init`/`pyproject.toml`, which at the fork root would collide
-with the official files. `tasks.py` holds every command; `make <target>` (Linux/macOS/WSL) and `python tasks.py <target>`
+used as a faster venv/pip — no `uv init`/`pyproject.toml`, which would collide with the official
+files. `tasks.py` holds every command; `make <target>` (Linux/macOS/WSL) and `python tasks.py <target>`
 (Windows) are the same thing. `python tasks.py help` lists them; `[REAL DATA]` ones read the match
 bundle — run them yourself and share only the aggregates they print.
 
@@ -30,10 +29,9 @@ Needs Python 3.12–3.13, git, and the match bundle (released to registered part
 this repo, never committed).
 
 ```powershell
-cd JS
 python tasks.py venv ; .venv\Scripts\Activate.ps1   # Python 3.13 venv (uv if installed, else python -m venv)
 python tasks.py setup                                # pinned deps + official repo (vendor/) + tests
-# unpack the bundle into the fork's data/  (data/tactical/..., data/broadcast/...)  or set MTAH_DATA_DIR
+# unpack the bundle into data/  (data/tactical/..., data/broadcast/...)  or set MTAH_DATA_DIR
 python tasks.py submit --team <team_name>            # -> results/<team_name>.csv, officially validated
 python tasks.py reproduce --team <team_name>         # regenerate + byte-compare
 ```

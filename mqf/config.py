@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]                               # our package root (JS/)
+ROOT = Path(__file__).resolve().parents[1]                               # our package root (the repo root)
 
 
 def _repo_root(pkg_root: Path) -> Path:

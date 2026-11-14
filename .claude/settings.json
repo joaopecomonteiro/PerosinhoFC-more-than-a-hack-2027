@@ -2,18 +2,20 @@
   "permissions": {
     "deny": [
       "Read(/data/**)",
+      "Read(/cache/**)",
+      "Read(/results/**)",
+      "Read(/reports/**)",
       "Read(/evaluation/results/**)",
       "Read(/evaluation/reports/**)",
       "Read(/evaluation/gt/**)",
-      "Read(/JS/cache/**)",
-      "Read(/JS/results/**)",
-      "Read(/JS/reports/**)",
       "Read(**/*.mp4)",
       "Read(**/*_atd.*)",
       "Read(**/*_homography.csv)",
       "Read(**/*_smart_tagging.xml)",
-      "Edit(/JS/vendor/**)",
-      "Edit(/data/**)"
+      "Read(**/*.npz)",
+      "Edit(/vendor/**)",
+      "Edit(/data/**)",
+      "Write(/data/**)"
     ]
   }
 }

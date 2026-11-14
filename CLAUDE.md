@@ -1,6 +1,7 @@
 # Més que un Frame — More than a Hack 2027, Phase 1 (FC Barcelona × Metrica Sports)
 
-Our own public repo (not a fork). Task: label every frame of FC Barcelona vs Athletic Club
+Our public repo: a fork of the official one, with our code (`mqf/`, `tests/`, `tasks.py`) at the
+top next to the official files. Task: label every frame of FC Barcelona vs Athletic Club
 (199,319 tactical-video frames) as H / A / D. Ranked on **spellF1**, tie-break macroF1. Floor:
 spellF1 **0.2433**. Deadline **17 Nov 2026**. Full context and plan: `docs/CONTEXT.md` — read it
 at the start of every session.
@@ -20,8 +21,7 @@ before bumping `OFFICIAL_COMMIT` (rules have been clarified mid-competition).
 1. **Never read, print, plot, summarise or receive the real match data or any extract** — the
    T&Cs forbid giving it to any cloud LLM, including you. Off-limits: `data/`, `cache/`,
    `results/`, `reports/`, `*.mp4`, `*_atd.*`, `*_homography.csv`, `*_smart_tagging.xml`.
-   In the fork layout (our code in `JS/`): the fork's `data/`, `JS/cache/`, `JS/results/`,
-   `JS/reports/`, and also the fork's `evaluation/results/` (baselines computed from the ATD).
+   Also `evaluation/results/` (baselines computed from the ATD) and `*.npz`.
    `.claude/settings.json` denies them; respect the intent too (no `head`, `np.load`, notebook
    outputs via Bash). Work from the schema, `mqf/synthetic.py` and other games. The team runs
    real-data commands and shares only aggregates (spellF1, macroF1, poss, dur, transF1,
