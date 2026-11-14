@@ -11,8 +11,13 @@ results/
 reports/
 
 # generated / downloaded other games
+# Careful: a pattern like "external/" matches a folder of that name at ANY depth, code included.
+# mqf/external/ (the external-games code) is re-included below; a new package named like one of
+# these folders (data, cache, results, reports, external) needs the same "!" line, or it never
+# reaches git.
 synthetic_data/
 external/
+!/mqf/external/
 external_data/
 data/
 

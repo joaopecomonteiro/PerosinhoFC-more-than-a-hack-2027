@@ -222,8 +222,8 @@ def _fixed(trk, spec, fixed, log) -> list[TrackingSet]:
     """The "Fixed" set, or nothing (no --no-fixed, never fatal)."""
     if not fixed:
         return []
-    from .fixed import fixed_tracking
     try:
+        from .fixed import fixed_tracking        # inside the try: a missing piece of Fixed never blocks Original
         windows = None
         if getattr(spec, "smart_tagging", None) and Path(spec.smart_tagging).is_file():
             from ..smart_tagging import kickoff_windows

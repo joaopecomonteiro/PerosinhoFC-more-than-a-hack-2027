@@ -177,6 +177,29 @@ class CleanConfig:
     centre_circle_m: float = 9.15
 
 
+def parse_clean_cfg(items) -> CleanConfig:
+    """["inherit_team=0", "fast_windows_s=0.2,1"] -> CleanConfig (bools 0/1, tuples comma-separated, empty = ()).
+    The --clean-cfg / --fixed-cfg parser of the viewer, the harness and mqf.external.evaluate. It lives
+    here, next to CleanConfig, so the viewer needs nothing from mqf.external."""
+    from dataclasses import replace
+    base = CleanConfig()
+    out = {}
+    for kv in items or []:
+        k, _, v = kv.partition("=")
+        if not hasattr(base, k):
+            raise SystemExit(f"--clean-cfg: unknown CleanConfig field {k}")
+        cur = getattr(base, k)
+        if isinstance(cur, bool):
+            out[k] = v.strip().lower() in ("1", "true", "yes", "on")
+        elif isinstance(cur, tuple):
+            out[k] = tuple(float(x) for x in v.split(",") if x.strip())
+        elif isinstance(cur, str):
+            out[k] = v.strip()
+        else:
+            out[k] = type(cur)(float(v))
+    return replace(base, **out)
+
+
 def _runs(mask: np.ndarray):
     """(starts, ends exclusive) of True runs."""
     e = np.diff(np.r_[0, mask.astype(np.int8), 0])

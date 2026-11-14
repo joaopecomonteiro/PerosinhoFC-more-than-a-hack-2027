@@ -55,9 +55,11 @@ def main(argv=None):
     def log(msg: str):
         print(f"[{time.time() - t0:5.1f} s] {msg}", flush=True)
 
-    from ..external.evaluate import parse_clean_cfg
-    fixed = None if args.no_fixed else {"model_path": args.fixed_model, "device": args.fixed_device,
-                                        "force": args.refix, "clean_cfg": parse_clean_cfg(args.fixed_cfg)}
+    fixed = None
+    if not args.no_fixed:                        # BAR-ATH alone is enough: nothing from mqf.external
+        from ..tracks import parse_clean_cfg
+        fixed = {"model_path": args.fixed_model, "device": args.fixed_device, "force": args.refix,
+                 "clean_cfg": parse_clean_cfg(args.fixed_cfg)}
     if args.synthetic:
         g = G.synthetic_game(args.pred, None if args.gt == "public" else args.gt, args.resync, log, fixed=fixed)
     else:

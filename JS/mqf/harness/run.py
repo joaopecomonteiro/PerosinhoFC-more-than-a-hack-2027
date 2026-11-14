@@ -50,7 +50,7 @@ def main():
     ap.add_argument("--clean-cfg", nargs="*", default=[], metavar="FIELD=VALUE",
                     help="CleanConfig overrides for --clean-tracks, e.g. keeper_takeover=0")
     args = ap.parse_args()
-    from ..external.evaluate import parse_clean_cfg
+    from ..tracks import parse_clean_cfg
     clean_cfg = parse_clean_cfg(args.clean_cfg)
 
     default = NoiseConfig()
