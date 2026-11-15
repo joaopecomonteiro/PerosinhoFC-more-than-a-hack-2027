@@ -35,6 +35,9 @@ class Params:
     w_dead: float = 1.0           # weight of the learned P(dead) (mqf.dead) when features carry it
     dead_who: str = "zero"        # D's "who" term: "zero" (v0: uncertainty about who quietly favours D)
                                   # or "max" (who-evidence never favours or penalises D)
+    w_who_model: float = 1.0      # weight of the learned P(home | alive) (mqf.who) where features carry it;
+                                  # times w_filled on an imputed ball
+    who_clip: float = 0.02        # ... clipped to [clip, 1 - clip]: one frame never says more than log-odds 3.9
 
 
 def _sig(x):
@@ -54,6 +57,15 @@ def emissions(feat: pd.DataFrame, p: Params, tags: TagEvidence | None = None) ->
     control = np.where(seen, _sig((p.loose_m - np.nan_to_num(d_min, nan=99.0)) / 1.0), 0.0)
     logit_h = control * d_diff / p.tau_m
     logit_h += p.w_spread * np.nan_to_num(feat["spread_diff"].to_numpy()) * (~tracked)
+    # ... or the learned P(home | alive): it has the distances, the shape and the time context in it
+    has_who = np.zeros(len(feat), dtype=bool)
+    if "p_home_model" in feat:
+        phm = feat["p_home_model"].to_numpy(dtype=np.float64)
+        has_who = ~np.isnan(phm)
+    learned_who = bool(has_who.any())
+    if learned_who:                   # (no row with a model value -> v0's logit untouched, dtype included)
+        pc = np.clip(np.nan_to_num(phm, nan=0.5), p.who_clip, 1 - p.who_clip)
+        logit_h = np.where(has_who, np.log(pc) - np.log(1 - pc), logit_h)
     if tags is not None:
         logit_h += p.w_tags * (tags.vote[:, 0] - tags.vote[:, 1])
     p_h = np.clip(_sig(logit_h), eps, 1 - eps)
@@ -68,7 +80,7 @@ def emissions(feat: pd.DataFrame, p: Params, tags: TagEvidence | None = None) ->
     p_dead = np.where(feat["ball_out"].to_numpy(), 0.97, p_dead)
     p_dead = np.clip(p_dead, eps, 1 - eps)
 
-    if not filled.any() and not learned and p.dead_who == "zero":      # v0, bit for bit
+    if not filled.any() and not learned and not learned_who and p.dead_who == "zero":      # v0, bit for bit
         ll = np.stack([np.log(1 - p_dead) + np.log(p_h),
                        np.log(1 - p_dead) + np.log(1 - p_h),
                        np.log(p_dead)], axis=1)
@@ -80,7 +92,12 @@ def emissions(feat: pd.DataFrame, p: Params, tags: TagEvidence | None = None) ->
         w_ad = np.where(feat["ball_out"].to_numpy(), p.w_seen, p.w_dead)[:, None]
     else:
         w_ad = np.where(tracked, p.w_seen, p.w_unseen)[:, None]                 # an imputed ball says nothing
-    w_who = np.where(filled, p.w_filled, np.where(tracked, p.w_seen, p.w_unseen))[:, None]  # about dead
+    w_who = np.where(filled, p.w_filled, np.where(tracked, p.w_seen, p.w_unseen))           # about dead
+    # the learned "who" knows whether it saw a ball (it was trained with the ball hidden too): one
+    # weight with or without it, lowered only where the ball it read was imputed
+    if learned_who:
+        w_who = np.where(has_who, p.w_who_model * np.where(filled, p.w_filled, 1.0), w_who)
+    w_who = w_who[:, None]
     return alive_ll * w_ad + who_ll * w_who
 
 

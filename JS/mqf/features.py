@@ -34,10 +34,11 @@ def _run_length(flag: np.ndarray) -> np.ndarray:
 
 
 def build(trk: Tracking, pitch: tuple[float, float], fps: int, ball_filled: np.ndarray | None = None,
-          p_dead: np.ndarray | None = None) -> pd.DataFrame:
+          p_dead: np.ndarray | None = None, p_home: np.ndarray | None = None) -> pd.DataFrame:
     """ball_filled: frames whose ball was imputed (mqf.ball). They count as seen for "who is closer",
     never for ball_out or the missing-ball run (the decoder weights them with Params.w_filled).
-    p_dead: the learned per-frame P(dead) (mqf.dead) -- replaces v0's speed rule in the decoder."""
+    p_dead: the learned per-frame P(dead) (mqf.dead) -- replaces v0's speed rule in the decoder.
+    p_home: the learned per-frame P(home | alive) (mqf.who) -- replaces v0's "who is closer"."""
     length, width = pitch
     home = trk.team_of_slot == 0
     away = ~home
@@ -73,6 +74,8 @@ def build(trk: Tracking, pitch: tuple[float, float], fps: int, ball_filled: np.n
     })
     if p_dead is not None:
         df["p_dead_model"] = np.asarray(p_dead, dtype=np.float64)
+    if p_home is not None:
+        df["p_home_model"] = np.asarray(p_home, dtype=np.float64)
     df["d_diff"] = df["d_away"] - df["d_home"]          # > 0 -> home closer
     df["spread_diff"] = df["spread_home"] - df["spread_away"]  # > 0 -> home more spread (attacking shape)
     return df

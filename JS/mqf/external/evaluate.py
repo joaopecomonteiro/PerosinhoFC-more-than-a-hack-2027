@@ -5,6 +5,8 @@
     python -m mqf.external.evaluate --split val --tag v0     # only the validation games (splits.json)
     python -m mqf.external.evaluate --split val --source idsse metrica pff --dead-model models/dead_v1.joblib \
         --players-drop --hide-dead-ball --ball-fill --grid w_dead=0.5,1,2 dead_who=zero,max --tag dead_v1
+    python -m mqf.external.evaluate --split val --source idsse metrica --dead-model models/dead_v1.joblib \
+        --who-model models/who_v1.joblib --players-drop --hide-dead-ball --ball-fill --grid w_who_model=0.25,0.5,1 --tag who_v1
     python -m mqf.external.evaluate --split val --source idsse metrica pff --atd-noise --seeds 0 1 \
         --noise team_flip_p=0.05 gk_team_flip_p=0.5 --clean-tracks --tag teamfix_on
     ... --clean-cfg inherit_team=0 kickoff_check=0 fast_windows_s= --tag teamfix_off    # the v3 cleaner
@@ -67,9 +69,10 @@ def load(d, players_drop: bool = False, hide_dead_ball: bool = False, clean_trac
     return spec, trk, gt
 
 
-def evidence(spec, trk, ball_model=None, dead_model=None, device="cpu"):
-    """features.build with the optional filled ball (frozen setting) and learned P(dead)."""
-    filled = p_dead = None
+def evidence(spec, trk, ball_model=None, dead_model=None, device="cpu", who_model=None):
+    """features.build with the optional filled ball (frozen setting), learned P(dead) and learned
+    P(home | alive) -- the last one reads the ball as the decoder gets it (filled when it is)."""
+    filled = p_dead = p_home = None
     if ball_model is not None:
         from ..ball import impute
         F = impute.FROZEN
@@ -82,7 +85,10 @@ def evidence(spec, trk, ball_model=None, dead_model=None, device="cpu"):
     if dead_model is not None:
         from .. import dead
         p_dead = dead.predict(dead_model, trk.players, trk.team_of_slot, spec.fps, spec.pitch, spec.halves)
-    return features.build(trk, spec.pitch, spec.fps, ball_filled=filled, p_dead=p_dead)
+    if who_model is not None:
+        from .. import who
+        p_home = who.predict(who_model, trk.players, trk.team_of_slot, trk.ball, spec.fps, spec.pitch, spec.halves)
+    return features.build(trk, spec.pitch, spec.fps, ball_filled=filled, p_dead=p_dead, p_home=p_home)
 
 
 def predict(d, params: decode.Params, clean_tracks: bool = False) -> tuple:
@@ -121,6 +127,7 @@ def main(argv=None) -> int:
     ap.add_argument("--tag", default="dev")
     ap.add_argument("--clean-tracks", action="store_true", help="team-level tracklet cleaning (mqf.tracks) before features")
     ap.add_argument("--dead-model", type=Path, help="learned P(dead) (mqf.dead), e.g. models/dead_v1.joblib")
+    ap.add_argument("--who-model", type=Path, help="learned P(home | alive) (mqf.who), e.g. models/who_v1.joblib")
     ap.add_argument("--ball-fill", action="store_true", help="fill the missing ball with the frozen setting")
     ap.add_argument("--players-drop", action="store_true", help="ATD-like player dropouts (condition)")
     ap.add_argument("--hide-dead-ball", action="store_true", help="no ball on dead frames (condition, as BAR-ATH)")
@@ -146,6 +153,10 @@ def main(argv=None) -> int:
     if args.dead_model:
         from .. import dead
         dead_model = dead.load_model(args.dead_model)
+    who_model = None
+    if args.who_model:
+        from .. import who
+        who_model = who.load_model(args.who_model)
     rows = []
     for source in args.source:
         names = args.matches
@@ -160,7 +171,7 @@ def main(argv=None) -> int:
             ncfg = replace(noise_base, seed=seed) if noise_base is not None else None
             spec, trk, gt = load(d, args.players_drop, args.hide_dead_ball, args.clean_tracks, noise_cfg=ncfg,
                                  clean_cfg=clean_cfg)
-            feat = evidence(spec, trk, ball_model, dead_model, device)
+            feat = evidence(spec, trk, ball_model, dead_model, device, who_model=who_model)
             for ci, over in enumerate(combos):
                 params = replace(decode.Params(), **over)
                 pred = decode.decode(feat, spec.halves, spec.n_frames, params, tags=None)
@@ -202,6 +213,7 @@ def main(argv=None) -> int:
     cond = {"clean_tracks": args.clean_tracks, "clean_cfg": args.clean_cfg,
             "atd_noise": asdict(noise_base) if noise_base is not None else None, "seeds": args.seeds if noise_base else None,
             "dead_model": str(args.dead_model) if args.dead_model else None,
+            "who_model": str(args.who_model) if args.who_model else None,
             "ball_fill": args.ball_fill, "players_drop": args.players_drop, "hide_dead_ball": args.hide_dead_ball}
     out.write_text(json.dumps({"params": asdict(decode.Params()), "grid": combos, **cond, "runs": rows,
                                "mean_by_source": {s: {"spellF1": float(g.spellF1.mean()), "macroF1": float(g.macroF1.mean()),

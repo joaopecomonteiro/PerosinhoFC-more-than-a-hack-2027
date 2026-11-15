@@ -5,6 +5,7 @@
     python -m mqf.make_submission --synthetic             # synthetic match, no data needed
     python -m mqf.make_submission --team <team_name> --ball-fill   # + missing ball filled (needs torch, CPU ok)
     python -m mqf.make_submission --team <team_name> --dead-model models/dead_v1.joblib   # + learned P(dead)
+    python -m mqf.make_submission --team <team_name> --who-model models/who_v1.joblib     # + learned P(home | alive)
 
 Writes results/<team>.csv (+ .json run report) and runs the OFFICIAL validator.
 Deterministic: same data + same code -> byte-identical file. The run options are saved in the .json
@@ -51,7 +52,8 @@ def fill_ball(trk: atd.Tracking, spec, model_path: Path | None = None):
 
 
 def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tracks: bool = False,
-        ball_fill: bool = False, ball_model: Path | None = None, dead_model: Path | None = None) -> dict:
+        ball_fill: bool = False, ball_model: Path | None = None, dead_model: Path | None = None,
+        who_model: Path | None = None) -> dict:
     t0 = time.time()
     trk = atd.load(spec)
     clean_report = None
@@ -69,7 +71,12 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
         from . import dead
         p_dead = dead.predict(dead.load_model(dead_model), trk.players, trk.team_of_slot, spec.fps, spec.pitch,
                               spec.halves)
-    feat = features.build(trk, spec.pitch, spec.fps, ball_filled=filled, p_dead=p_dead)
+    p_home = None
+    if who_model:                     # reads the ball as the decoder gets it (filled when --ball-fill)
+        from . import who
+        p_home = who.predict(who.load_model(who_model), trk.players, trk.team_of_slot, trk.ball, spec.fps,
+                             spec.pitch, spec.halves)
+    feat = features.build(trk, spec.pitch, spec.fps, ball_filled=filled, p_dead=p_dead, p_home=p_home)
     tags = None
     if use_tags and spec.smart_tagging and Path(spec.smart_tagging).exists():
         tags = smart_tagging.evidence(spec.smart_tagging, spec.atd_meta, spec.n_frames, spec.fps)
@@ -81,9 +88,11 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
               "used_tags": tags is not None, "clean_tracks": clean_report, "ball_fill": fill_report,
               **decode.spell_stats(labels, spec.fps),
               "dead_share_model": None if p_dead is None else round(float(np.mean(p_dead[~np.isnan(p_dead)] >= 0.5)), 3),
+              "home_share_model": None if p_home is None else round(float(np.mean(p_home[~np.isnan(p_home)] >= 0.5)), 3),
               "options": {"use_tags": use_tags, "clean_tracks": clean_tracks, "ball_fill": ball_fill,
                           "ball_model": str(ball_model) if ball_model else None,
-                          "dead_model": str(dead_model) if dead_model else None},
+                          "dead_model": str(dead_model) if dead_model else None,
+                          "who_model": str(who_model) if who_model else None},
               "params": asdict(params)}
     Path(out).with_suffix(".json").write_text(json.dumps(report, indent=2))
     return report
@@ -98,6 +107,7 @@ def main():
     ap.add_argument("--ball-fill", action="store_true", help="fill the missing ball (mqf.ball.impute.FROZEN; torch, CPU)")
     ap.add_argument("--ball-model", type=Path, default=None, help="override the frozen ball model file")
     ap.add_argument("--dead-model", type=Path, default=None, help="learned P(dead) (mqf.dead), e.g. models/dead_v1.joblib")
+    ap.add_argument("--who-model", type=Path, default=None, help="learned P(home | alive) (mqf.who), e.g. models/who_v1.joblib")
     ap.add_argument("--out", type=Path, help="override output path")
     ap.add_argument("--reproduce", action="store_true",
                     help="regenerate into cache/reproduce/ and check it is byte-identical to results/<team>.csv")
@@ -119,12 +129,13 @@ def main():
                 raise SystemExit(f"nothing to compare against: {reference} does not exist")
 
     opts = {"use_tags": not args.no_tags, "clean_tracks": args.clean_tracks, "ball_fill": args.ball_fill,
-            "ball_model": args.ball_model, "dead_model": args.dead_model}
+            "ball_model": args.ball_model, "dead_model": args.dead_model, "who_model": args.who_model}
     if args.reproduce and not args.synthetic and reference.with_suffix(".json").exists():   # options of the reference
         saved = json.loads(reference.with_suffix(".json").read_text()).get("options")
         if saved:
             opts = {**saved, "ball_model": Path(saved["ball_model"]) if saved.get("ball_model") else None,
-                    "dead_model": Path(saved["dead_model"]) if saved.get("dead_model") else None}
+                    "dead_model": Path(saved["dead_model"]) if saved.get("dead_model") else None,
+                    "who_model": Path(saved["who_model"]) if saved.get("who_model") else None}
             print(f"reproducing with the reference's options: {saved}")
     report = run(spec, decode.Params(), out, **opts)
     print(json.dumps({k: v for k, v in report.items() if k != "params"}, indent=2))
