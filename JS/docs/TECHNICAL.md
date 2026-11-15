@@ -141,6 +141,31 @@ the decoder its weight is `w_dead`, the same with or without a ball, and `dead_w
 quietly pushed towards D). Settings are chosen on the validation games with the official metric
 (`mqf.external.evaluate --grid`).
 
+**Dead-ball experiments (`mqf/alive/`, in validation, opt-in, EXPERIMENTS #42).** With who_v1 fixed, the true
+alive mask scores ~0.11 spellF1 above dead_v1 (#38), the largest gap left; dead_v1 is already good per frame
+(AUC 0.95–0.98), so its losses are segment-level: missed short stoppages (merges), spurious D blips (splits)
+and late boundaries. The same pattern appears in the literature on in-game status from player tracking (Lang
+et al. 2022: frame F1 0.93 but stoppage F1 0.80, about a fifth of the boundaries more than 2 s off). The
+package is built like `mqf/owner`: one feature table from positions (dead_v1's 36 columns; collective speed /
+acceleration, restart-burst and stillness clocks; set-piece shapes from the Laws — box and goal-area crowding,
+a player at a corner mark, beyond the touchline or goal line, the kickoff shape, crowding, bench side; the ball
+only where TRACKED — out of the pitch, distance to the lines / corner / goal area / centre spot, still, a
+restart kick as a speed jump from < 2 to > 7 m/s, as ELASTIC finds set-piece kicks). The ball's absence is
+never a feature, and every training view makes it label-independent (spans of the better-seen class removed
+until alive and dead frames are seen equally often), because whether a missing ball means a stoppage is a
+property of the tracking system. Law-based rules (Vidal-Codina et al. 2022-style triggers; every half starts
+dead and leaves that state at the first restart it sees — no frame constant) give a hand-made alive layer, rule
+columns and restart / stop candidates. Models: GBM (dead_v1's settings), MLP, an ASRF-style TCN with a boundary
+head and an ASFormer-lite (windowed self-attention), seeds and source sets as in #40. Decoder variants on the
+production HMM: a half-start D prior, boundary-aware dead costs, a minimum stoppage length, snapping restarts /
+stops to rule candidates, a rule veto, and a Smart Tagging prior (the first 2.5 s of every SET PIECES window;
+its weight is set on tag-like windows simulated from other games' labels, never on BAR-ATH). Everything is
+scored on the 11 validation games with the official metric under three ball-loss assumptions (ball removed
+on exactly the dead frames / on most stoppages with jittered edges / at random), because how much BAR-ATH's
+missing ball overlaps its stoppages is unknown; a change is kept only if it passes in all of them
+(`python -m mqf.alive.suite`). `make_submission --alive-model … --alive-variant …` uses it; its `hmm` variant is
+the production decoder bit for bit, and `FINAL` is unchanged until the harness says otherwise.
+
 **Who has the ball (`mqf/who.py`, in validation).** The ground truth is ownership: the last team in
 control keeps the ball while it flies, bounces or is contested. v0's "team of the nearest player
 now" was right on ~78–79 % of alive frames of the validation games. A per-frame

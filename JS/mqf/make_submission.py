@@ -8,6 +8,8 @@
     python -m mqf.make_submission --team <team_name> --dead-model models/dead_v1.joblib   # + learned P(dead)
     python -m mqf.make_submission --team <team_name> --who-model models/who_v1.joblib     # + learned P(home | alive)
     python -m mqf.make_submission --team <team_name> ... --params dead_who=max       # decoder overrides (decode.Params)
+    python -m mqf.make_submission --team <team_name> ... --alive-model models/alive_gbm_full_impff.joblib \
+        --alive-variant start+min2 [--alive-tag-w 1]   # the mqf.alive layer instead of --dead-model (opt-in)
 
 Writes results/<team>.csv (+ .json run report) and runs the OFFICIAL validator.
 Deterministic: same data + same code -> byte-identical file. The run options and decoder parameters
@@ -36,7 +38,8 @@ from .config import CACHE_DIR, MODELS_DIR, RESULTS_DIR, ROOT, SYNTHETIC_DIR, com
 FINAL = {"options": {"use_tags": True, "clean_tracks": True, "ball_fill": True, "ball_model": None,
                      "dead_model": "models/dead_v1.joblib", "who_model": "models/who_v1.joblib"},
          "params": {"dead_who": "max"}}
-_PATH_OPTS = ("ball_model", "dead_model", "who_model")
+_PATH_OPTS = ("ball_model", "dead_model", "who_model", "alive_model")
+_ALIVE_DEFAULTS = {"alive_model": None, "alive_variant": "hmm", "alive_tag_w": 0.0, "alive_goal_w": 0.0}
 
 
 def parse_params(items) -> dict:
@@ -70,14 +73,21 @@ def settings(args, saved: dict | None = None) -> tuple[dict, decode.Params]:
             raise SystemExit(f"the reference report has decoder parameters this code does not know: {unknown}")
         params = decode.Params(**saved.get("params", {}))
     elif args.final:
-        given = [f for f in ("no_tags", "clean_tracks", "ball_fill", "ball_model", "dead_model", "who_model", "params")
-                 if getattr(args, f)]
+        given = [f for f in ("no_tags", "clean_tracks", "ball_fill", "ball_model", "dead_model", "who_model", "params",
+                             "alive_model", "alive_tag_w", "alive_goal_w") if getattr(args, f, None)]
+        if getattr(args, "alive_variant", "hmm") != "hmm":
+            given.append("alive_variant")
         if given:
             raise SystemExit(f"--final is the frozen recipe; drop {', '.join('--' + g.replace('_', '-') for g in given)}")
         opts, params = {**FINAL["options"]}, replace(decode.Params(), **FINAL["params"])
     else:
         opts = {"use_tags": not args.no_tags, "clean_tracks": args.clean_tracks, "ball_fill": args.ball_fill,
-                "ball_model": args.ball_model, "dead_model": args.dead_model, "who_model": args.who_model}
+                "ball_model": args.ball_model, "dead_model": args.dead_model, "who_model": args.who_model,
+                **{k: getattr(args, k, v) for k, v in _ALIVE_DEFAULTS.items()}}
+        if opts["alive_model"] and opts["dead_model"]:
+            raise SystemExit("--alive-model replaces --dead-model: give one of them")
+        from .alive import combine as acombine
+        acombine.parse_variant(opts["alive_variant"])
         params = replace(decode.Params(), **parse_params(args.params))
     return {k: (Path(v) if k in _PATH_OPTS and v else v) for k, v in opts.items()}, params
 
@@ -113,7 +123,8 @@ def fill_ball(trk: atd.Tracking, spec, model_path: Path | None = None):
 
 def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tracks: bool = False,
         ball_fill: bool = False, ball_model: Path | None = None, dead_model: Path | None = None,
-        who_model: Path | None = None) -> dict:
+        who_model: Path | None = None, alive_model: Path | None = None, alive_variant: str = "hmm",
+        alive_tag_w: float = 0.0, alive_goal_w: float = 0.0) -> dict:
     t0 = time.time()
     trk = atd.load(spec)
     clean_report = None
@@ -124,9 +135,19 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
             windows = smart_tagging.kickoff_windows(spec.smart_tagging, spec.fps, spec.n_frames)
         trk, clean_report = tracks.clean(trk, spec.fps, spec.pitch, kickoff_windows=windows, halves=spec.halves)
     filled, fill_report = None, None
+    tracked_ball = trk.ball.copy()                     # the alive layer reads the TRACKED ball, never a filled one
     if ball_fill:
         trk, filled, fill_report = fill_ball(trk, spec, _model_file(ball_model))
     p_dead = None
+    alive_on = bool(alive_model) or alive_variant != "hmm" or alive_tag_w > 0
+    p_bnd = rr = None
+    if alive_model:
+        from .alive import predict as apredict
+        p_dead, p_bnd, rr = apredict.p_dead(_model_file(alive_model), trk.players, trk.team_of_slot, tracked_ball,
+                                            spec.fps, spec.pitch, spec.halves, device="cpu")
+    elif alive_on:
+        from .alive import predict as apredict
+        rr = apredict.rules_only(trk.players, trk.team_of_slot, tracked_ball, spec.fps, spec.pitch, spec.halves)
     if dead_model:
         from . import dead
         p_dead = dead.predict(dead.load_model(_model_file(dead_model)), trk.players, trk.team_of_slot, spec.fps, spec.pitch,
@@ -140,7 +161,27 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
     tags = None
     if use_tags and spec.smart_tagging and Path(spec.smart_tagging).exists():
         tags = smart_tagging.evidence(spec.smart_tagging, spec.atd_meta, spec.n_frames, spec.fps)
-    labels = decode.decode(feat, spec.halves, spec.n_frames, params, tags)
+    alive_report = None
+    if alive_on:                      # the mqf.alive decoder (its "hmm" variant = decode.decode, bit for bit)
+        from .alive import combine as acombine
+        variant, tb = alive_variant, None
+        if alive_tag_w > 0 or alive_goal_w > 0:
+            if not (use_tags and spec.smart_tagging and Path(spec.smart_tagging).exists()):
+                raise SystemExit("--alive-tag-w / --alive-goal-w need the Smart Tagging file")
+            sp, gl = acombine.tag_windows_from_xml(spec.smart_tagging, spec.fps, spec.n_frames)
+            tb = acombine.tag_bonus(spec.n_frames, sp, spec.fps, goal_windows=gl, w_goal=alive_goal_w / max(alive_tag_w, 1e-9))
+            variant = variant if "tags" in variant.split("+") else variant + "+tags"
+            alive_report = {"set_piece_windows": len(sp), "goal_windows": len(gl)}
+        if p_dead is None and "tags" in variant.split("+"):
+            raise SystemExit("the Smart Tagging dead prior needs a learned P(dead) (--alive-model or --dead-model)")
+        labels = acombine.decode_variant(variant, feat, p_dead, spec.halves, spec.n_frames, spec.fps, params, rr,
+                                         p_bnd, tb, max(alive_tag_w, 1e-9) if tb is not None else 0.0, None, tags)
+        if labels is None:
+            raise SystemExit(f"--alive-variant {alive_variant}: needs a boundary (a tcn / asf --alive-model)")
+        alive_report = {**(alive_report or {}), "variant": variant,
+                        "rule_dead_share": round(float(rr["dead"][~np.isnan(rr["p_dead"])].mean()), 3) if rr else None}
+    else:
+        labels = decode.decode(feat, spec.halves, spec.n_frames, params, tags)
     submission.write(out, labels)
     # Aggregates only -- this report is what the team may share (e.g. with an AI assistant).
     report = {"file": Path(out).name, "seconds": round(time.time() - t0, 1),
@@ -149,10 +190,14 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
               **decode.spell_stats(labels, spec.fps),
               "dead_share_model": None if p_dead is None else round(float(np.mean(p_dead[~np.isnan(p_dead)] >= 0.5)), 3),
               "home_share_model": None if p_home is None else round(float(np.mean(p_home[~np.isnan(p_home)] >= 0.5)), 3),
+              "alive": alive_report,
               "options": {"use_tags": use_tags, "clean_tracks": clean_tracks, "ball_fill": ball_fill,
                           "ball_model": Path(ball_model).as_posix() if ball_model else None,
                           "dead_model": Path(dead_model).as_posix() if dead_model else None,
-                          "who_model": Path(who_model).as_posix() if who_model else None},
+                          "who_model": Path(who_model).as_posix() if who_model else None,
+                          **({"alive_model": Path(alive_model).as_posix() if alive_model else None,
+                              "alive_variant": alive_variant, "alive_tag_w": alive_tag_w, "alive_goal_w": alive_goal_w}
+                             if alive_on else {})},
               "params": asdict(params)}
     Path(out).with_suffix(".json").write_text(json.dumps(report, indent=2))
     return report
@@ -170,6 +215,11 @@ def main():
     ap.add_argument("--dead-model", type=Path, default=None, help="learned P(dead) (mqf.dead), e.g. models/dead_v1.joblib")
     ap.add_argument("--who-model", type=Path, default=None, help="learned P(home | alive) (mqf.who), e.g. models/who_v1.joblib")
     ap.add_argument("--params", nargs="*", default=[], metavar="KEY=VALUE", help="decoder overrides, e.g. dead_who=max")
+    ap.add_argument("--alive-model", type=Path, default=None,
+                    help="learned P(dead) of mqf.alive (replaces --dead-model), e.g. models/alive_gbm_full_impff.joblib")
+    ap.add_argument("--alive-variant", default="hmm", help="mqf.alive decoder variant, e.g. start+min2 (combine.py)")
+    ap.add_argument("--alive-tag-w", type=float, default=0.0, help="Smart Tagging dead prior weight (SET PIECES windows)")
+    ap.add_argument("--alive-goal-w", type=float, default=0.0, help="dead prior after GOALS windows (not validated)")
     ap.add_argument("--out", type=Path, help="override output path")
     ap.add_argument("--reproduce", action="store_true",
                     help="regenerate into cache/reproduce/ and check it is byte-identical to results/<team>.csv")
