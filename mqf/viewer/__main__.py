@@ -2,6 +2,7 @@
 
     python -m mqf.viewer                               # BAR-ATH, public GT + every results/*.csv
     python -m mqf.viewer --pred results/Perosinho_FC.csv
+    python -m mqf.viewer --deadball                    # dead ball only: gray where dead, results/deadball/*.csv
     python -m mqf.viewer --gt none                     # model lanes only
     python -m mqf.viewer --synthetic                   # synthetic match (try: python -m mqf.viewer.demo)
     python -m mqf.viewer --no-broadcast                # skip the broadcast feed and its sync
@@ -46,6 +47,9 @@ def main(argv=None):
     ap.add_argument("--refix", action="store_true", help="recompute the fixed tracking (ignore its cache)")
     ap.add_argument("--fixed-cfg", nargs="*", default=[], metavar="FIELD=VALUE",
                     help="mqf.tracks.CleanConfig overrides for Fixed, e.g. keeper_takeover=0 (cached separately)")
+    ap.add_argument("--deadball", action="store_true",
+                    help="dead ball only: every lane (ground truth included) shows gray where the ball is dead and "
+                         "nothing else; default lanes = results/deadball/*.csv")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
     args = ap.parse_args(argv)
@@ -60,11 +64,19 @@ def main(argv=None):
         from ..tracks import parse_clean_cfg
         fixed = {"model_path": args.fixed_model, "device": args.fixed_device, "force": args.refix,
                  "clean_cfg": parse_clean_cfg(args.fixed_cfg)}
+    preds = args.pred
+    if args.deadball and not preds and not args.synthetic:
+        from ..config import RESULTS_DIR
+        preds = sorted((RESULTS_DIR / "deadball").glob("*.csv")) or None
     if args.synthetic:
-        g = G.synthetic_game(args.pred, None if args.gt == "public" else args.gt, args.resync, log, fixed=fixed)
+        g = G.synthetic_game(preds, None if args.gt == "public" else args.gt, args.resync, log, fixed=fixed)
     else:
-        g = G.competition(args.pred, args.gt, broadcast=not args.no_broadcast, resync=args.resync, log=log,
+        g = G.competition(preds, args.gt, broadcast=not args.no_broadcast, resync=args.resync, log=log,
                           fixed=fixed)
+    if args.deadball:                            # H / A -> no label: only the gray dead ball is drawn
+        import numpy as np
+        for lane in g.lanes:
+            lane.codes = np.where(lane.codes == 2, 2, 3).astype(lane.codes.dtype)
     meta, blobs = G.bundle(g)
 
     log(f"{g.title}: {g.n_frames:,} frames, lanes: " + (", ".join(l.name for l in g.lanes) or "none"))
