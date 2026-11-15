@@ -16,9 +16,10 @@
     "METRICA-2"
   ],
   "seed": 0,
-  "code": "92b99dff5b",
+  "table_seed": 0,
+  "code": "ca188ab983",
   "rows": 441264,
-  "train_s": 4.6,
+  "train_s": 2.9,
   "model": "owner_gbm_q_stack_im.joblib",
   "n_columns": 109,
   "rule_cfg": {
@@ -38,6 +39,6 @@
     "p_floor": 0.65,
     "p_contest": 0.6
   },
-  "iters": 60,
+  "iters": 30,
   "epochs": null
 }

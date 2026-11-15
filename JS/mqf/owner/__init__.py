@@ -6,7 +6,7 @@ baseline, or the learned P(dead) of mqf.dead), so the team part can be compared 
 
     rules.py       hand rules: control (close, free, moving with the ball), passes, touches ignored
     feats.py       the feature table (who.py's 59 columns + relative velocity, +-3 s windows,
-                   team shape, optional rule columns) and the 5 Hz sequences for the GRU
+                   team shape, optional rule and pass-direction columns) and the 5 Hz sequences
     data.py        training rows / sequences per game, cached under external/cache/owner
     models.py      GBM (HistGradientBoosting), MLP, TCN + boundary head, BiGRU -- one predict() for all
     train.py       python -m mqf.owner.train gbm|mlp|tcn|gru ...
@@ -15,6 +15,7 @@ baseline, or the learned P(dead) of mqf.dead), so the team part can be compared 
     suite.py       python -m mqf.owner.suite            (everything, in order)
     pathcrf_bridge.py  PathCRF (KDD 2026) trained on our IDSSE split as an outside reference
     tcn_check.py   python -m mqf.owner.tcn_check        (TCN seeds x sources under the submission's conditions)
+    heading_check.py  python -m mqf.owner.heading_check (the pass-direction columns vs who_v1, #41)
 
 Other games only (splits.json). Nothing here reads the competition match.
 """

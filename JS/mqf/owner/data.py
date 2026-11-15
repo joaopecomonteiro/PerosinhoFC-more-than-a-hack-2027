@@ -4,9 +4,10 @@ Per game, four views like who.py: the game as delivered and "hard" (ATD-like pla
 ball on dead frames, 40 % of each half's alive ball hidden in 0.2-30 s spans), each in both team
 orders (home / away is arbitrary; the label flips with them). For every view:
 
-  rows   the full_rules table (feats.py) on alive frames every 1 / SAMPLE_HZ s, label 1 = home.
-         The `who` and `full` sets are column subsets of it, so one cache serves every model.
-  seq    every 1 / SAMPLE_HZ s over each whole half: the full_rules table + the nearest players
+  rows   the full_rules_heading table (feats.py) on alive frames every 1 / SAMPLE_HZ s, label 1 = home.
+         The `who`, `full`, `full_rules` and `full_heading` sets are column subsets of it, so one cache
+         serves every model (the heading columns were added on 15 Nov: older sets never read them).
+  seq    every 1 / SAMPLE_HZ s over each whole half: the full_rules_heading table + the nearest players
          (feats.seq_inputs), label 1 home / 0 away / -1 dead. The GRU reads its per-frame subset, the
          TCN the full columns.
 
@@ -86,7 +87,7 @@ def game_tables(g, seed: int = 0, rule_cfg: rules.RuleConfig | None = None,
         rng = np.random.default_rng([seed, zlib.crc32(g.name.encode()), int(hard)])   # per game, any game set
         players, ball = view_inputs(g, rng, hard)
         team = (1 - g.team) if swap else g.team
-        X = feats.features(players, team, ball, g.fps, g.pitch, g.halves, "full_rules", rule_cfg)
+        X = feats.features(players, team, ball, g.fps, g.pitch, g.halves, "full_rules_heading", rule_cfg)
         cols = list(X.columns)
         home = "A" if swap else "H"
         Xs.append(X.iloc[alive_idx].to_numpy(dtype=np.float32))
@@ -144,12 +145,13 @@ def stack_rows(tables, columns: list[str], subsample: int = 1):
 
 def columns_of(feature_set: str, all_columns: list[str]) -> list[str]:
     """The columns of a feature set, in the cached table's order."""
-    if feature_set == "full_rules":
-        return list(all_columns)
-    if feature_set == "full":
-        return [c for c in all_columns if not c.startswith("rule_")]
     if feature_set == "who":
         w = feats.who_columns()
         assert list(all_columns[:len(w)]) == w, "cached table does not start with who.py's columns"
         return w
-    raise ValueError(feature_set)
+    if feature_set not in feats.FEATURE_SETS:
+        raise ValueError(feature_set)
+    cols = [c for c in all_columns if feats.keep_column(c, feature_set)]
+    if feats.has_heading(feature_set) and not set(feats.HEADING_COLS) <= set(cols):
+        raise ValueError(f"{feature_set}: the table has no heading columns (built by older code?)")
+    return cols

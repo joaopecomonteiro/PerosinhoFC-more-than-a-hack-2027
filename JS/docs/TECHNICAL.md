@@ -177,6 +177,13 @@ true count), and spells under 3 s are still matched only 1 time in 8 (EXPERIMENT
 costs were swept with the model on (63 settings, on the 11 validation games and on 8 further PFF
 games): a lower switch cost finds more of the short spells and adds as many unmatched ones, every
 setting from 9 to 18 is within ±0.007 spellF1, and the costs stay as they were (EXPERIMENTS #36).
+Pass-direction columns (`mqf/owner/feats.heading_columns`, experimental, not in the submission;
+EXPERIMENTS #41): the cosine between the ball's velocity and the ball → nearest player of each team (a
+pass in flight points at its receiver), that player's |v_player − v_ball|, a "close and moving with the
+ball" log-odds over every player, and the last team in clear control (nearest within 1.2 m, 0.5 m ahead
+of the other team's nearest) carried and faded over 4 s. Ported from a team-mate's experiment on other
+games; thresholds from that experiment, none from BAR-ATH. They did not help: no change for the trees and,
+in the TCN ensemble, −0.002 spellF1 under the ATD noise model (#41); the submission does not use them.
 
 ## 4. Training / validation data
 | dataset | source / licence | labelled by | amount | used for |

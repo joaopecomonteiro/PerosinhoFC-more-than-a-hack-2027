@@ -1,0 +1,44 @@
+{
+  "tag": "q_stack_heading_im",
+  "kind": "gbm",
+  "feature_set": "full_rules_heading",
+  "sources": [
+    "idsse",
+    "metrica"
+  ],
+  "train_games": [
+    "IDSSE-J03WN1",
+    "IDSSE-J03WOH",
+    "IDSSE-J03WOY",
+    "IDSSE-J03WPY",
+    "IDSSE-J03WR9",
+    "METRICA-1",
+    "METRICA-2"
+  ],
+  "seed": 0,
+  "table_seed": 0,
+  "code": "ca188ab983",
+  "rows": 441264,
+  "train_s": 3.0,
+  "model": "owner_gbm_q_stack_heading_im.joblib",
+  "n_columns": 118,
+  "rule_cfg": {
+    "r_touch_m": 1.5,
+    "r_free_m": 3.0,
+    "free_from": "opponents",
+    "v_match_ms": 2.5,
+    "dwell_s": 0.4,
+    "gap_tol_s": 0.2,
+    "pass_chain": 2,
+    "chain_gap_s": 3.0,
+    "vel_half_s": 0.2,
+    "filled_can_control": false,
+    "tau_s": 4.0,
+    "p_ctrl": 0.97,
+    "p_hold": 0.9,
+    "p_floor": 0.65,
+    "p_contest": 0.6
+  },
+  "iters": 30,
+  "epochs": null
+}

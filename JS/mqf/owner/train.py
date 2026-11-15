@@ -2,6 +2,7 @@
 
     python -m mqf.owner.train gbm --tag full_im --feature-set full --sources idsse metrica
     python -m mqf.owner.train gbm --tag stack_im --feature-set full_rules --sources idsse metrica
+    python -m mqf.owner.train gbm --tag full_heading_im --feature-set full_heading --sources idsse metrica
     python -m mqf.owner.train gbm --tag full_all --feature-set full --sources idsse metrica skillcorner pff
     python -m mqf.owner.train mlp --tag full_im --feature-set full --sources idsse metrica
     python -m mqf.owner.train tcn --tag im --sources idsse metrica          # TCN + boundary head (full set)
@@ -75,7 +76,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("kind", choices=KINDS)
     ap.add_argument("--tag", required=True)
-    ap.add_argument("--feature-set", default="full", choices=("who", "full", "full_rules"),
+    ap.add_argument("--feature-set", default="full", choices=feats.FEATURE_SETS,
                     help="gbm / mlp / tcn columns (gru always reads the per-frame sequence inputs)")
     ap.add_argument("--sources", nargs="*", default=["idsse", "metrica"])
     ap.add_argument("--rule-cfg", nargs="*", default=[], metavar="FIELD=VALUE", help="RuleConfig overrides (rule columns)")

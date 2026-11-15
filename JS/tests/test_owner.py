@@ -253,8 +253,8 @@ def test_experiment_runner_on_bundles(tmp_path, monkeypatch, tiny_models, offici
     assert experiment.main(args) == 0
     out = json.loads((tmp_path / "owner_t.json").read_text())
     methods = {r["method"] for r in out["runs"]}
-    assert {"nearest", "hold", "smooth50", "rule", "rule_hard", "rule_seg", "gbm", "gbm_hard", "gru", "gru_hard",
-            "gbm+prod", "gbm+prod0.5", "gbm+override", "gbm+veto"} <= methods
+    assert {"nearest", "hold", "blend", "smooth50", "rule", "rule_hard", "rule_seg", "gbm", "gbm_hard", "gru",
+            "gru_hard", "gbm+prod", "gbm+prod0.5", "gbm+override", "gbm+veto"} <= methods
     assert {r["layer"] for r in out["runs"]} == {"oracle", "smooth50"} and {r["game"] for r in out["runs"]} == {"METRICA-7", "METRICA-8"}
     best = max(r["spellF1"] for r in out["runs"] if r["layer"] == "oracle" and r["method"] == "gbm")
     assert best > 0.5
@@ -437,3 +437,152 @@ def test_tcn_check_commands_parse(tmp_path, monkeypatch):
     assert atd.seeds == [0, 1, 2] and atd.noise == [] and flip.seeds == [0, 1]
     assert flip.noise == ["team_flip_p=0.05", "gk_team_flip_p=0.5"]
     assert {m.split("=")[0] for m in bar.models} == {"who_v1", *bar.boundary_from}
+
+
+# ------------------------------------------------------------------ pass-direction columns (15 Nov)
+
+def test_heading_columns_toy_scene():
+    """head / dvn / z_couple / z_chain / age_ctrl on the toy scene, by their definitions."""
+    P, team, b, halves = _toy_scene()
+    f = feats.heading_columns(P, team, b, FPS, halves)
+    assert set(f) == set(feats.HEADING_COLS) and all(len(v) == 200 for v in f.values())
+    dribble, away_dribble, to_home1 = slice(10, 44), slice(140, 165), slice(72, 84)
+    np.testing.assert_allclose(f["dvn_h"][dribble], 0.0, atol=1e-9)           # home 0 moves exactly with the ball
+    np.testing.assert_allclose(f["dvn_a"][away_dribble], 0.0, atol=1e-9)
+    assert (f["z_couple"][dribble] > 3).all() and (f["z_couple"][away_dribble] < -3).all()
+    assert (f["head_h"][to_home1] > 0.99).all() and (f["head_a"][to_home1] < 0).all()   # flying at home 1
+    assert (f["head_diff"][to_home1] > 1).all()
+    assert np.nanmax(np.abs(f["head_h"])) <= 1 + 1e-9
+    assert (f["z_chain"][dribble] == 3).all() and (f["age_ctrl"][dribble] == 0).all()
+    assert (f["z_chain"][95:118] == 3).all()                                  # home 1 holds it, nobody near
+    np.testing.assert_allclose(np.diff(f["age_ctrl"][122:129]), 1 / FPS)    # long pass: nobody in control
+    np.testing.assert_allclose(f["z_chain"][122:129], 2 * (1 - f["age_ctrl"][122:129] / feats.CHAIN_FADE_S))
+    # no ball: no geometry, the chain carries; a new half restarts the chain
+    b2 = b.copy()
+    b2[100:105] = np.nan
+    one = feats.heading_columns(P, team, b2, FPS, ((1, 0, 199),))
+    two = feats.heading_columns(P, team, b2, FPS, ((1, 0, 99), (2, 100, 199)))
+    for c in ("head_h", "head_a", "dvn_h", "z_couple"):
+        assert np.isnan(one[c][100:105]).all()
+    np.testing.assert_allclose(one["z_chain"][100:105], 2 * (1 - one["age_ctrl"][100:105] / feats.CHAIN_FADE_S))
+    assert (one["z_chain"][100:105] > 1.85).all() and np.isnan(two["z_chain"][100:105]).all()   # carried, fading
+    assert np.isnan(two["age_ctrl"][100:105]).all() and two["z_chain"][105] == 3
+    out = feats.heading_columns(P, team, b, FPS, ((1, 20, 179),))
+    assert all(np.isnan(v[:20]).all() and np.isnan(v[180:]).all() for v in out.values())
+
+
+def test_heading_swap_symmetry_and_old_sets_unchanged():
+    m = _match(6)
+    args = (m["players"], m["team_of_player"], m["ball"], FPS, m["pitch"], m["halves"])
+    X = feats.features(*args, feature_set="full_rules_heading")
+    Xs = feats.features(m["players"], 1 - m["team_of_player"], *args[2:], feature_set="full_rules_heading")
+    for a, b in (("head_h", "head_a"), ("dvn_h", "dvn_a"), ("age_ctrl", "age_ctrl")):
+        np.testing.assert_array_equal(X[a].to_numpy(), Xs[b].to_numpy())
+    for c in ("head_diff", "dvn_diff", "z_couple", "z_chain"):
+        np.testing.assert_array_equal(X[c].to_numpy(), -Xs[c].to_numpy())
+    assert X.iloc[:500].isna().all().all() and X[list(feats.HEADING_COLS)].iloc[600:11_000].notna().mean().min() > 0.5
+    cols = list(X.columns)
+    for fs in ("full", "full_rules", "full_heading"):                     # the cached table serves every set
+        ref = feats.features(*args, feature_set=fs)
+        assert data.columns_of(fs, cols) == list(ref.columns), fs
+        np.testing.assert_array_equal(X[list(ref.columns)].to_numpy(), ref.to_numpy())
+    assert not set(feats.HEADING_COLS) & set(data.columns_of("full", cols) + data.columns_of("full_rules", cols))
+    assert data.columns_of("full_heading", cols)[-9:] == list(feats.HEADING_COLS)
+    with pytest.raises(ValueError):
+        data.columns_of("full_heading", data.columns_of("full_rules", cols))   # a table from older code
+    S, names = feats.seq_inputs(*args, X_full=X, columns="all")
+    assert not set(feats.HEADING_COLS) & set(feats.tcn_columns(names, "full") + feats.gru_columns(names))
+    th = feats.tcn_columns(names, "full_heading")
+    assert set(feats.HEADING_COLS) <= set(th) and not any(c.startswith("rule_") for c in th)
+    assert feats.tcn_columns(names, "full_rules_heading") == names
+    assert feats.tcn_columns(names, "full") == [c for c in names if not c.startswith("rule_") and c not in feats.HEADING_COLS]
+
+
+def test_heading_gbm_and_blend():
+    from mqf.owner import models
+    games = [bdata.game_from_match(_match(s), f"SYN-{s}") for s in (61, 62)]
+    T = data.load_tables("train", ["x"], 0, use_cache=False, games=games, log=None, keep_seq=False)
+    assert set(feats.HEADING_COLS) <= set(T[0][2]["columns"])
+    cols = data.columns_of("full_heading", T[0][2]["columns"])
+    X, y, _ = data.stack_rows(T, cols)
+    mod = models.train_gbm(X, y, cols, "full_heading", {}, {}, iters=30, log=lambda m: None)
+    m = _match(63)
+    views = [{"X": feats.features(m["players"], t, m["ball"], FPS, m["pitch"], m["halves"], "full_rules_heading"),
+              "S": None, "seq_columns": None} for t in (m["team_of_player"], 1 - m["team_of_player"])]
+    n = len(m["labels"])
+    p, ps = mod.p_home(views, m["halves"], n, FPS), mod.p_home(views[::-1], m["halves"], n, FPS)
+    inside = np.isfinite(p)
+    np.testing.assert_allclose(p[inside] + ps[inside], 1.0, atol=1.5e-4)
+    alive = np.isin(m["labels"], ["H", "A"])
+    assert np.mean((p[alive] > 0.5) == (m["labels"][alive] == "H")) > 0.9
+    b = combine.blend(np.array([2.0, np.nan, np.nan, 1.0]), np.array([np.nan, -1.0, np.nan, 3.0]))
+    np.testing.assert_allclose(b, np.round(1 / (1 + np.exp(-np.array([2.0, -1.0, 0.0, 2.0]))), 4))
+    X0, Xs = views[0]["X"], views[1]["X"]
+    bl, bls = combine.blend(X0["z_couple"], X0["z_chain"]), combine.blend(Xs["z_couple"], Xs["z_chain"])
+    np.testing.assert_allclose(bl + bls, 1.0, atol=1.5e-4)
+    assert np.mean((bl[alive] > 0.5) == (m["labels"][alive] == "H")) > 0.8
+
+
+def _fake_runs(conds, methods, layers=("dead_v1", "oracle"), seed=0):
+    rng = np.random.default_rng(seed)
+    out = {}
+    for cname, seeds in conds.items():
+        rows = []
+        for g in range(8):
+            for sd in seeds:
+                base = 0.5 + 0.01 * g
+                for meth, shift, sd_noise in methods:
+                    for layer in layers:
+                        rows.append({"method": meth, "layer": layer, "decoder": "hmm", "game": f"G{g}", "seed": sd,
+                                     "source": "idsse" if g < 4 else "pff",
+                                     "spellF1": base + shift + sd_noise * rng.standard_normal()})
+        out[cname] = rows
+    return out
+
+
+def test_heading_check_report_rule(tmp_path, monkeypatch):
+    from mqf.owner import heading_check as hc
+    monkeypatch.setattr(hc, "HARNESS_DIR", tmp_path)
+    meths = [("who_v1", 0, 0), ("gbm_full_heading_im", 0.01, 0.001), ("gbm_stack_heading_im", 0, 0.01),
+             ("gbm_full_im", 0.001, 0.001), ("gbm_stack_im", 0, 0.001), ("blend", -0.2, 0.01), ("nearest", -0.2, 0.01)]
+    for cname, rows in _fake_runs({"bar": [0], "atd": [0, 1]}, meths).items():
+        (tmp_path / f"owner_t_{cname}.json").write_text(json.dumps({"runs": rows}))
+    bnd = "+bnd0.5"
+    tm = [("who_v1", 0, 0), ("ens_impff" + bnd, 0.05, 0.001), ("ens_impff_hd" + bnd, 0.05, 0.01),
+          ("ens_impff", 0.04, 0.001), ("ens_impff_hd", 0.04, 0.001)]
+    tm += [(f"tcn_full{h}_impff_s{k}{bnd}", 0.04, 0.001) for k in (0, 1, 2) for h in ("", "_heading")]
+    for cname, rows in _fake_runs({"bar": [0], "atd": [0, 1, 2], "atd_flip": [0, 1]}, tm).items():
+        (tmp_path / f"owner_t_tcn_{cname}.json").write_text(json.dumps({"runs": rows}))
+    assert hc.main(["--stage", "report", "--tcn", "--tag", "t"]) == 0
+    v = {r["comparison"]: r["pass"] for r in json.loads((tmp_path / "owner_t_report.json").read_text())["verdict"]}
+    assert v["gbm_full_heading_im vs who_v1"] and not v["gbm_stack_heading_im vs who_v1"] and not v["blend vs who_v1"]
+    assert v["heading effect: gbm_full_heading_im - gbm_full_im"]
+    assert v["ens_impff_hd + own boundary vs who_v1"]
+    assert not v["heading effect: ens_impff_hd - ens_impff (both + own boundary)"]     # no gain over #40's ensemble
+    text = (tmp_path / "owner_t_report.md").read_text()
+    assert "expect 0.516" in text and "expect +0.048" in text and "over 3 seeds" in text
+
+
+def test_heading_check_commands_parse(tmp_path, monkeypatch):
+    """The driver's runner command lines are valid for the runner's own parser, with the right models."""
+    from mqf.owner import experiment, heading_check as hc, train
+    for tag, _, _ in hc.GBM_JOBS:
+        (tmp_path / f"owner_gbm_{tag}.joblib").write_bytes(b"")
+    for k in (0, 1, 2):
+        for h in (False, True):
+            (tmp_path / f"owner_tcn_{hc.tcn_tag(k, h)}.pt").write_bytes(b"")
+    monkeypatch.setattr(train, "MODELS_DIR", tmp_path)
+    monkeypatch.setattr(hc, "HARNESS_DIR", tmp_path)
+    seen = []
+    monkeypatch.setattr(experiment, "main", lambda args: seen.append(experiment.parser().parse_args(args)) or 0)
+    assert hc.main(["--stage", "eval", "--tcn", "--tag", "t"]) == 0
+    assert [(a.condition, a.seeds, a.clean_tracks) for a in seen] == [
+        ("bar", [0], False), ("atd", [0, 1], False), ("bar", [0], True), ("atd", [0, 1, 2], True), ("atd", [0, 1], True)]
+    gbm, tcn = seen[0], seen[2]
+    assert {x.split("=")[0] for x in gbm.models} == {"who_v1", "gbm_full_im", "gbm_stack_im", "gbm_full_heading_im",
+                                                      "gbm_stack_heading_im"}
+    assert gbm.boundary_from is None and gbm.hard == [] and gbm.layers == ["dead_v1", "oracle"] and gbm.ref == "who_v1"
+    assert len(tcn.boundary_from) == 6 and tcn.bnd_alpha == [0.5] and tcn.ensemble == [
+        "ens_impff=tcn_full_impff_s0,tcn_full_impff_s1,tcn_full_impff_s2",
+        "ens_impff_hd=tcn_full_heading_impff_s0,tcn_full_heading_impff_s1,tcn_full_heading_impff_s2"]
+    assert seen[4].noise == ["team_flip_p=0.05", "gk_team_flip_p=0.5"] and seen[1].tag == "t_atd"

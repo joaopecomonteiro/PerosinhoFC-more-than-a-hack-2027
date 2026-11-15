@@ -1,0 +1,307 @@
+{
+ "summary": {
+  "gbm": {
+   "dead_v1": {
+    "gbm_full_im vs who_v1": {
+     "bar": {
+      "a": "gbm_full_im",
+      "b": "who_v1",
+      "mean": -0.035468859163474975,
+      "se": 0.004561539435728129,
+      "wins": "0/3",
+      "a_spellF1": 0.519402878715598,
+      "b_spellF1": 0.554871737879073,
+      "d_idsse": -0.028101100397885714,
+      "d_metrica": -0.03449333685182743,
+      "d_pff": -0.04381214024071178,
+      "verdict": "b better"
+     }
+    },
+    "gbm_stack_im vs who_v1": {
+     "bar": {
+      "a": "gbm_stack_im",
+      "b": "who_v1",
+      "mean": -0.04803985062509556,
+      "se": 0.0048980310620224425,
+      "wins": "0/3",
+      "a_spellF1": 0.5068318872539773,
+      "b_spellF1": 0.554871737879073,
+      "d_idsse": -0.05001361804970739,
+      "d_metrica": -0.03874331550802146,
+      "d_pff": -0.05536261831755784,
+      "verdict": "b better"
+     }
+    },
+    "gbm_full_heading_im vs who_v1": {
+     "bar": {
+      "a": "gbm_full_heading_im",
+      "b": "who_v1",
+      "mean": -0.030771415619328096,
+      "se": 0.0036004931891166487,
+      "wins": "0/3",
+      "a_spellF1": 0.5241003222597448,
+      "b_spellF1": 0.554871737879073,
+      "d_idsse": -0.035003870206779586,
+      "d_metrica": -0.023609853873011843,
+      "d_pff": -0.033700522778192854,
+      "verdict": "b better"
+     }
+    },
+    "gbm_stack_heading_im vs who_v1": {
+     "bar": {
+      "a": "gbm_stack_heading_im",
+      "b": "who_v1",
+      "mean": -0.04641720657060392,
+      "se": 0.01040291591039431,
+      "wins": "0/3",
+      "a_spellF1": 0.508454531308469,
+      "b_spellF1": 0.554871737879073,
+      "d_idsse": -0.04095524528698474,
+      "d_metrica": -0.03176177836761784,
+      "d_pff": -0.06653459605720918,
+      "verdict": "b better"
+     }
+    },
+    "blend vs who_v1": {
+     "bar": {
+      "a": "blend",
+      "b": "who_v1",
+      "mean": -0.15123089508166673,
+      "se": 0.02836572959730875,
+      "wins": "0/3",
+      "a_spellF1": 0.40364084279740614,
+      "b_spellF1": 0.554871737879073,
+      "d_idsse": -0.10688979362318529,
+      "d_metrica": -0.20404853193421457,
+      "d_pff": -0.14275435968760036,
+      "verdict": "b better"
+     }
+    },
+    "nearest vs who_v1": {
+     "bar": {
+      "a": "nearest",
+      "b": "who_v1",
+      "mean": -0.23957806812242635,
+      "se": 0.04201770158499855,
+      "wins": "0/3",
+      "a_spellF1": 0.3152936697566466,
+      "b_spellF1": 0.554871737879073,
+      "d_idsse": -0.20076090650936879,
+      "d_metrica": -0.3235341718302044,
+      "d_pff": -0.1944391260277059,
+      "verdict": "b better"
+     }
+    },
+    "heading effect: gbm_full_heading_im - gbm_full_im": {
+     "bar": {
+      "a": "gbm_full_heading_im",
+      "b": "gbm_full_im",
+      "mean": 0.00469744354414688,
+      "se": 0.005804385022574476,
+      "wins": "2/3",
+      "a_spellF1": 0.5241003222597448,
+      "b_spellF1": 0.519402878715598,
+      "d_idsse": -0.006902769808893872,
+      "d_metrica": 0.010883482978815584,
+      "d_pff": 0.01011161746251893,
+      "verdict": "no gap"
+     }
+    },
+    "heading effect: gbm_stack_heading_im - gbm_stack_im": {
+     "bar": {
+      "a": "gbm_stack_heading_im",
+      "b": "gbm_stack_im",
+      "mean": 0.0016226440544916398,
+      "se": 0.006425342317519025,
+      "wins": "2/3",
+      "a_spellF1": 0.508454531308469,
+      "b_spellF1": 0.5068318872539773,
+      "d_idsse": 0.009058372762722644,
+      "d_metrica": 0.006981537140403615,
+      "d_pff": -0.01117197773965134,
+      "verdict": "no gap"
+     }
+    },
+    "blend - nearest (who_lab's comparison)": {
+     "bar": {
+      "a": "blend",
+      "b": "nearest",
+      "mean": 0.08834717304075962,
+      "se": 0.01976634384753663,
+      "wins": "3/3",
+      "a_spellF1": 0.40364084279740614,
+      "b_spellF1": 0.3152936697566466,
+      "d_idsse": 0.0938711128861835,
+      "d_metrica": 0.11948563989598981,
+      "d_pff": 0.05168476634010555,
+      "verdict": "a better"
+     }
+    }
+   },
+   "oracle": {
+    "gbm_full_im vs who_v1": {
+     "bar": {
+      "a": "gbm_full_im",
+      "b": "who_v1",
+      "mean": -0.04377902218676991,
+      "se": 0.007045335029018718,
+      "wins": "0/3",
+      "a_spellF1": 0.6305002118328065,
+      "b_spellF1": 0.6742792340195765,
+      "d_idsse": -0.030809977834010627,
+      "d_metrica": -0.05503461902673179,
+      "d_pff": -0.04549246969956733,
+      "verdict": "b better"
+     }
+    },
+    "gbm_stack_im vs who_v1": {
+     "bar": {
+      "a": "gbm_stack_im",
+      "b": "who_v1",
+      "mean": -0.060383921513058124,
+      "se": 0.004332494828048037,
+      "wins": "0/3",
+      "a_spellF1": 0.6138953125065183,
+      "b_spellF1": 0.6742792340195765,
+      "d_idsse": -0.06257994216118534,
+      "d_metrica": -0.0665450195564139,
+      "d_pff": -0.052026802821575124,
+      "verdict": "b better"
+     }
+    },
+    "gbm_full_heading_im vs who_v1": {
+     "bar": {
+      "a": "gbm_full_heading_im",
+      "b": "who_v1",
+      "mean": -0.041960664612476384,
+      "se": 0.007558809317148021,
+      "wins": "0/3",
+      "a_spellF1": 0.6323185694071,
+      "b_spellF1": 0.6742792340195765,
+      "d_idsse": -0.028125279215634902,
+      "d_metrica": -0.04360167482379784,
+      "d_pff": -0.05415503979799641,
+      "verdict": "b better"
+     }
+    },
+    "gbm_stack_heading_im vs who_v1": {
+     "bar": {
+      "a": "gbm_stack_heading_im",
+      "b": "who_v1",
+      "mean": -0.05755946817279737,
+      "se": 0.007807359938182059,
+      "wins": "0/3",
+      "a_spellF1": 0.616719765846779,
+      "b_spellF1": 0.6742792340195765,
+      "d_idsse": -0.04371153518923132,
+      "d_metrica": -0.05823518117460513,
+      "d_pff": -0.07073168815455566,
+      "verdict": "b better"
+     }
+    },
+    "blend vs who_v1": {
+     "bar": {
+      "a": "blend",
+      "b": "who_v1",
+      "mean": -0.1915648448963069,
+      "se": 0.04706766642720067,
+      "wins": "0/3",
+      "a_spellF1": 0.48271438912326947,
+      "b_spellF1": 0.6742792340195765,
+      "d_idsse": -0.09752903523734024,
+      "d_metrica": -0.24233048838311977,
+      "d_pff": -0.23483501106846077,
+      "verdict": "b better"
+     }
+    },
+    "nearest vs who_v1": {
+     "bar": {
+      "a": "nearest",
+      "b": "who_v1",
+      "mean": -0.3125966533351507,
+      "se": 0.043161294673422994,
+      "wins": "0/3",
+      "a_spellF1": 0.36168258068442566,
+      "b_spellF1": 0.6742792340195765,
+      "d_idsse": -0.24732828557439218,
+      "d_metrica": -0.39415651759958736,
+      "d_pff": -0.2963051568314726,
+      "verdict": "b better"
+     }
+    },
+    "heading effect: gbm_full_heading_im - gbm_full_im": {
+     "bar": {
+      "a": "gbm_full_heading_im",
+      "b": "gbm_full_im",
+      "mean": 0.0018183575742935314,
+      "se": 0.005817225394251328,
+      "wins": "2/3",
+      "a_spellF1": 0.6323185694071,
+      "b_spellF1": 0.6305002118328065,
+      "d_idsse": 0.002684698618375725,
+      "d_metrica": 0.011432944202933948,
+      "d_pff": -0.008662570098429079,
+      "verdict": "no gap"
+     }
+    },
+    "heading effect: gbm_stack_heading_im - gbm_stack_im": {
+     "bar": {
+      "a": "gbm_stack_heading_im",
+      "b": "gbm_stack_im",
+      "mean": 0.00282445334026075,
+      "se": 0.011187867840486001,
+      "wins": "2/3",
+      "a_spellF1": 0.616719765846779,
+      "b_spellF1": 0.6138953125065183,
+      "d_idsse": 0.01886840697195402,
+      "d_metrica": 0.008309838381808765,
+      "d_pff": -0.018704885332980536,
+      "verdict": "no gap"
+     }
+    },
+    "blend - nearest (who_lab's comparison)": {
+     "bar": {
+      "a": "blend",
+      "b": "nearest",
+      "mean": 0.1210318084388438,
+      "se": 0.029786578094217236,
+      "wins": "3/3",
+      "a_spellF1": 0.48271438912326947,
+      "b_spellF1": 0.36168258068442566,
+      "d_idsse": 0.14979925033705194,
+      "d_metrica": 0.1518260292164676,
+      "d_pff": 0.06147014576301185,
+      "verdict": "a better"
+     }
+    }
+   }
+  }
+ },
+ "verdict": [
+  {
+   "pass": false,
+   "comparison": "gbm_full_heading_im vs who_v1",
+   "meaning": "replaces who_v1 (#38 rule)"
+  },
+  {
+   "pass": false,
+   "comparison": "gbm_stack_heading_im vs who_v1",
+   "meaning": "replaces who_v1 (#38 rule)"
+  },
+  {
+   "pass": false,
+   "comparison": "blend vs who_v1",
+   "meaning": "replaces who_v1 (#38 rule)"
+  },
+  {
+   "pass": false,
+   "comparison": "heading effect: gbm_full_heading_im - gbm_full_im",
+   "meaning": "the columns add something to the trees"
+  },
+  {
+   "pass": false,
+   "comparison": "heading effect: gbm_stack_heading_im - gbm_stack_im",
+   "meaning": "the columns add something to the trees"
+  }
+ ]
+}

@@ -258,6 +258,13 @@ def owner_suite(a, extra):
     run(PY, "-m", "mqf.owner.suite", *extra)
 
 
+@task("heading-check")
+def heading_check(a, extra):
+    """Pass-direction columns (who_lab) vs who_v1 under #38's protocol (#41), e.g. -- --quick, -- --tcn."""
+    _need_torch()
+    run(PY, "-m", "mqf.owner.heading_check", *extra)
+
+
 @task("eval-ball")
 def eval_ball(a, extra):
     """Ball protocol on the validation games: buckets, team-nearest agreement, downstream spellF1."""

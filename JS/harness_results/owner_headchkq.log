@@ -1,0 +1,26 @@
+=== mqf.owner.heading_check --quick  (2026-11-15 19:57)
+== train GBM: ['gbm_full_im', 'gbm_stack_im', 'gbm_full_heading_im', 'gbm_stack_heading_im'] on ['idsse', 'metrica']
+  IDSSE-J03WN1 (1/7)
+  IDSSE-J03WOH (2/7)
+  IDSSE-J03WOY (3/7)
+  IDSSE-J03WPY (4/7)
+  IDSSE-J03WR9 (5/7)
+  METRICA-1 (6/7)
+  METRICA-2 (7/7)
+  7 games' tables ready in 80 s
+  gbm on 7 games, 441,264 rows (50.0% home), 97 features
+  gbm fit 441,264 rows x 97 in 2 s
+  wrote C:\Users\pc\Documents\GitHub\PerosinhoFC-more-than-a-hack-2027\JS\models\owner_gbm_q_full_im.joblib (4 s)
+  gbm on 7 games, 441,264 rows (50.0% home), 109 features
+  gbm fit 441,264 rows x 109 in 3 s
+  wrote C:\Users\pc\Documents\GitHub\PerosinhoFC-more-than-a-hack-2027\JS\models\owner_gbm_q_stack_im.joblib (3 s)
+  gbm on 7 games, 441,264 rows (50.0% home), 106 features
+  gbm fit 441,264 rows x 106 in 3 s
+  wrote C:\Users\pc\Documents\GitHub\PerosinhoFC-more-than-a-hack-2027\JS\models\owner_gbm_q_full_heading_im.joblib (3 s)
+  gbm on 7 games, 441,264 rows (50.0% home), 118 features
+  gbm fit 441,264 rows x 118 in 3 s
+  wrote C:\Users\pc\Documents\GitHub\PerosinhoFC-more-than-a-hack-2027\JS\models\owner_gbm_q_stack_heading_im.joblib (3 s)
+== eval headchkq_bar
+  python -m mqf.owner.experiment --split val --source idsse metrica pff --condition bar --layers dead_v1 oracle --decoders hmm --models who_v1=C:\Users\pc\Documents\GitHub\PerosinhoFC-more-than-a-hack-2027\JS\models\who_v1.joblib gbm_full_im=C:\Users\pc\Documents\GitHub\PerosinhoFC-more-than-a-hack-2027\JS\models\owner_gbm_q_full_im.joblib gbm_stack_im=C:\Users\pc\Documents\GitHub\PerosinhoFC-more-than-a-hack-2027\JS\models\owner_gbm_q_stack_im.joblib gbm_full_heading_im=C:\Users\pc\Documents\GitHub\PerosinhoFC-more-than-a-hack-2027\JS\models\owner_gbm_q_full_heading_im.joblib gbm_stack_heading_im=C:\Users\pc\Documents\GitHub\PerosinhoFC-more-than-a-hack-2027\JS\models\owner_gbm_q_stack_heading_im.joblib --hard --ref who_v1 --device auto --tag headchkq_bar --max-games 1
+wrote C:\Users\pc\Documents\GitHub\PerosinhoFC-more-than-a-hack-2027\JS\harness_results\owner_headchkq_report.md
+=== done in 2 min

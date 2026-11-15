@@ -17,6 +17,7 @@ and method read the ball as tracked.
 Methods (P(home | alive) per frame; the alive layer and the decoder are applied on top):
   nearest      who is closer now (in the dead_v1 layer: exactly v0's emissions, #35's "base")
   hold         the last team within 2 m of the ball keeps it
+  blend        no training: who_lab's mean of z_couple and z_chain (feats.heading_columns) as log-odds
   smooth50     the official baseline's team (hard)
   rule         rules.py soft P(home); rule_hard = its owner as clipped evidence
   rule_seg     rules.py restarted at every alive run of the layer (who restarts = first contact)
@@ -131,14 +132,15 @@ def game_methods(G: dict, models: dict, hard_of, hybrid_bases, rule_cfg: rules.R
     views = []
     for k in (0, 1):
         team = trk.team_of_slot if k == 0 else 1 - trk.team_of_slot
-        X = feats.features(trk.players, team, G["ball"], fps, spec.pitch, halves, "full_rules", rule_cfg,
-                           ball_filled=G["filled"])
+        X = feats.features(trk.players, team, G["ball"], fps, spec.pitch, halves, "full_rules_heading", rule_cfg,
+                           ball_filled=G["filled"])                 # every set's columns: models pick theirs by name
         S, sc = feats.seq_inputs(trk.players, team, G["ball"], fps, spec.pitch, halves, X_full=X, columns="all") \
             if any(m.kind in ("gru", "tcn") for m in models.values()) else (None, None)
         views.append({"X": X, "S": S, "seq_columns": sc})
     X0 = views[0]["X"]
     P = {"nearest": np.where(inside, who.v0_p_home(X0), np.nan),
-         "hold": np.where(inside, who.hold_p_home(X0), np.nan)}
+         "hold": np.where(inside, who.hold_p_home(X0), np.nan),
+         "blend": np.where(inside, combine.blend(X0["z_couple"], X0["z_chain"]), np.nan)}
     sm_lab, sm_alive = combine.smooth50(trk.players, trk.team_of_slot, trk.ball, fps, halves, n)
     P["smooth50"] = np.where(inside, np.where(sm_lab == "H", 1 - CLIP, np.where(sm_lab == "A", CLIP, 0.5)), np.nan)
     rr = rules.owner(trk.players, trk.team_of_slot, G["ball"], fps, halves, rule_cfg, ball_filled=G["filled"])
@@ -146,7 +148,7 @@ def game_methods(G: dict, models: dict, hard_of, hybrid_bases, rule_cfg: rules.R
     P["rule_hard"] = combine.owner_to_p(rr["owner"], inside, CLIP)
     PB = {}
     for name, m in models.items():
-        if m.feature_set == "full_rules" and m.rule_cfg != rule_cfg:
+        if feats.has_rules(m.feature_set) and m.rule_cfg != rule_cfg:
             raise SystemExit(f"{name}: trained with other rule settings than --rule-cfg ({m.rule_cfg})")
         t0 = time.time()
         P[name], pb = m.p_home_and_boundary(views, halves, n, fps, device)

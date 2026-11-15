@@ -23,12 +23,16 @@ Hybrids (a model's p and the rule result r from rules.owner):
   veto      decode p, then merge back every short spell of team T sandwiched between spells of the
             other team inside one alive run when the rule saw no control or pass by T inside it
             (and the ball was tracked on enough of it to have seen one) -- "touches do not count"
+
+No training: blend() = who/who_lab.py's 'blend', the mean of the z_couple and z_chain log-odds
+(feats.heading_columns) where either is known, as P(home).
 """
 from __future__ import annotations
 
 import functools
 import importlib.util
 import math
+import warnings
 
 import numpy as np
 
@@ -43,6 +47,15 @@ def _logit(p, eps=1e-4):
 
 def _sig(x):
     return 1.0 / (1.0 + np.exp(-np.clip(x, -50, 50)))
+
+
+def blend(z_couple, z_chain) -> np.ndarray:
+    """P(home) = sigmoid(mean of the two log-odds where known); 0.5 where neither is (rounded to 1e-4)."""
+    z = np.vstack([np.asarray(z_couple, dtype=np.float64), np.asarray(z_chain, dtype=np.float64)])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)              # all-NaN columns -> NaN, handled below
+        m = np.nanmean(z, axis=0)
+    return np.round(_sig(np.nan_to_num(m, nan=0.0)), 4)
 
 
 def hard(p: np.ndarray, clip: float = 0.02) -> np.ndarray:
