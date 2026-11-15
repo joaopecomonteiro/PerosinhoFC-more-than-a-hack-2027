@@ -1,0 +1,868 @@
+{
+  "params": {
+    "tau_m": 1.5,
+    "loose_m": 4.0,
+    "still_speed": 1.3,
+    "still_width": 0.35,
+    "w_seen": 1.0,
+    "w_unseen": 0.15,
+    "w_filled": 0.4,
+    "w_spread": 0.15,
+    "w_tags": 0.4,
+    "switch_cost": 18.0,
+    "to_dead_cost": 10.0,
+    "from_dead_cost": 10.0,
+    "w_dead": 1.0,
+    "dead_who": "zero",
+    "w_who_model": 1.0,
+    "who_clip": 0.02
+  },
+  "grid": [
+    {
+      "dead_who": "max"
+    }
+  ],
+  "clean_tracks": false,
+  "clean_cfg": [],
+  "atd_noise": {
+    "ball_missing_target": 0.41,
+    "ball_burst_mean_s": 1.2,
+    "crowd_radius_m": 3.0,
+    "crowd_weight": 3.0,
+    "slots_per_team": 23,
+    "track_break_per_min": 1.2,
+    "dropout_share": 0.07,
+    "dropout_burst_mean_s": 0.6,
+    "duplicate_per_min": 0.3,
+    "duplicate_mean_s": 1.0,
+    "pos_jitter_m": 0.25,
+    "ball_jitter_m": 0.4,
+    "jitter_corr_s": 0.5,
+    "speed_window_s": 0.4,
+    "team_flip_p": 0.0,
+    "gk_team_flip_p": 0.0,
+    "hold_lost_s": 0.0,
+    "hold_lost_p": 1.0,
+    "seed": 0
+  },
+  "seeds": [
+    0,
+    1
+  ],
+  "dead_model": "models\\dead_v1.joblib",
+  "who_model": "models\\who_v1.joblib",
+  "ball_fill": true,
+  "players_drop": false,
+  "hide_dead_ball": true,
+  "runs": [
+    {
+      "source": "idsse",
+      "match": "IDSSE-J03WMX",
+      "fps": 25,
+      "combo": 0,
+      "noise_seed": 0,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.45225885225885226,
+      "macroF1": 0.8489070281631713,
+      "n_gt_spells": 511,
+      "n_pred_spells": 308,
+      "gt_dur_s": 6.682504892367906,
+      "pred_dur_s": 11.953636363636363,
+      "alive_dead_f1": 0.9272089824814556,
+      "team_acc_both_alive": 0.8962297413950322,
+      "transF1_12": 0.3123181377303589,
+      "transF1_25": 0.4267701260911736,
+      "by_length": {
+        "0-3s": {
+          "n": 254,
+          "match_rate": 0.09921259842519686
+        },
+        "3-10s": {
+          "n": 163,
+          "match_rate": 0.5202453987730062
+        },
+        "10-30s": {
+          "n": 76,
+          "match_rate": 0.7736842105263158
+        },
+        "30-infs": {
+          "n": 18,
+          "match_rate": 0.911111111111111
+        }
+      }
+    },
+    {
+      "source": "idsse",
+      "match": "IDSSE-J03WMX",
+      "fps": 25,
+      "combo": 0,
+      "noise_seed": 1,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.4579780755176614,
+      "macroF1": 0.8484036829931622,
+      "n_gt_spells": 511,
+      "n_pred_spells": 310,
+      "gt_dur_s": 6.682504892367906,
+      "pred_dur_s": 11.910451612903225,
+      "alive_dead_f1": 0.927288588715351,
+      "team_acc_both_alive": 0.8954453859040035,
+      "transF1_12": 0.27599611273080665,
+      "transF1_25": 0.39067055393586003,
+      "by_length": {
+        "0-3s": {
+          "n": 254,
+          "match_rate": 0.10551181102362203
+        },
+        "3-10s": {
+          "n": 163,
+          "match_rate": 0.5251533742331288
+        },
+        "10-30s": {
+          "n": 76,
+          "match_rate": 0.7736842105263158
+        },
+        "30-infs": {
+          "n": 18,
+          "match_rate": 0.9333333333333333
+        }
+      }
+    },
+    {
+      "source": "idsse",
+      "match": "IDSSE-J03WQQ",
+      "fps": 25,
+      "combo": 0,
+      "noise_seed": 0,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.5457063711911359,
+      "macroF1": 0.8416803803283764,
+      "n_gt_spells": 401,
+      "n_pred_spells": 321,
+      "gt_dur_s": 8.414164588528678,
+      "pred_dur_s": 11.566479750778818,
+      "alive_dead_f1": 0.9153990732222178,
+      "team_acc_both_alive": 0.9120875055492527,
+      "transF1_12": 0.297644539614561,
+      "transF1_25": 0.44967880085653106,
+      "by_length": {
+        "0-3s": {
+          "n": 155,
+          "match_rate": 0.21161290322580642
+        },
+        "3-10s": {
+          "n": 136,
+          "match_rate": 0.5367647058823529
+        },
+        "10-30s": {
+          "n": 93,
+          "match_rate": 0.810752688172043
+        },
+        "30-infs": {
+          "n": 17,
+          "match_rate": 0.9294117647058824
+        }
+      }
+    },
+    {
+      "source": "idsse",
+      "match": "IDSSE-J03WQQ",
+      "fps": 25,
+      "combo": 0,
+      "noise_seed": 1,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.5510489510489511,
+      "macroF1": 0.8430551516423578,
+      "n_gt_spells": 401,
+      "n_pred_spells": 314,
+      "gt_dur_s": 8.414164588528678,
+      "pred_dur_s": 11.85592356687898,
+      "alive_dead_f1": 0.9172984032329881,
+      "team_acc_both_alive": 0.9104996681986876,
+      "transF1_12": 0.33116883116883117,
+      "transF1_25": 0.47619047619047616,
+      "by_length": {
+        "0-3s": {
+          "n": 155,
+          "match_rate": 0.20516129032258065
+        },
+        "3-10s": {
+          "n": 136,
+          "match_rate": 0.5088235294117647
+        },
+        "10-30s": {
+          "n": 93,
+          "match_rate": 0.8559139784946236
+        },
+        "30-infs": {
+          "n": 17,
+          "match_rate": 0.9647058823529411
+        }
+      }
+    },
+    {
+      "source": "metrica",
+      "match": "METRICA-3",
+      "fps": 25,
+      "combo": 0,
+      "noise_seed": 0,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.6240928882438317,
+      "macroF1": 0.8610785147924709,
+      "n_gt_spells": 383,
+      "n_pred_spells": 306,
+      "gt_dur_s": 10.202610966057442,
+      "pred_dur_s": 14.07516339869281,
+      "alive_dead_f1": 0.9308791663623305,
+      "team_acc_both_alive": 0.9455249254590156,
+      "transF1_12": 0.39999999999999997,
+      "transF1_25": 0.4903954802259888,
+      "by_length": {
+        "0-3s": {
+          "n": 127,
+          "match_rate": 0.20944881889763783
+        },
+        "3-10s": {
+          "n": 128,
+          "match_rate": 0.6015625
+        },
+        "10-30s": {
+          "n": 94,
+          "match_rate": 0.8319148936170212
+        },
+        "30-infs": {
+          "n": 34,
+          "match_rate": 0.9764705882352942
+        }
+      }
+    },
+    {
+      "source": "metrica",
+      "match": "METRICA-3",
+      "fps": 25,
+      "combo": 0,
+      "noise_seed": 1,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.6277372262773723,
+      "macroF1": 0.8632639004556677,
+      "n_gt_spells": 383,
+      "n_pred_spells": 302,
+      "gt_dur_s": 10.202610966057442,
+      "pred_dur_s": 14.273245033112582,
+      "alive_dead_f1": 0.9317751505210436,
+      "team_acc_both_alive": 0.9470005641572118,
+      "transF1_12": 0.381171067738232,
+      "transF1_25": 0.486796785304248,
+      "by_length": {
+        "0-3s": {
+          "n": 127,
+          "match_rate": 0.1889763779527559
+        },
+        "3-10s": {
+          "n": 128,
+          "match_rate": 0.621875
+        },
+        "10-30s": {
+          "n": 94,
+          "match_rate": 0.8340425531914892
+        },
+        "30-infs": {
+          "n": 34,
+          "match_rate": 0.9705882352941176
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-10503",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 0,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.5067930489731437,
+      "macroF1": 0.850036750063131,
+      "n_gt_spells": 359,
+      "n_pred_spells": 274,
+      "gt_dur_s": 10.98080438841813,
+      "pred_dur_s": 15.339792347091619,
+      "alive_dead_f1": 0.9299419938388935,
+      "team_acc_both_alive": 0.9193780009691203,
+      "transF1_12": 0.23132530120481926,
+      "transF1_25": 0.3710843373493976,
+      "by_length": {
+        "0-3s": {
+          "n": 133,
+          "match_rate": 0.09323308270676692
+        },
+        "3-10s": {
+          "n": 111,
+          "match_rate": 0.49369369369369365
+        },
+        "10-30s": {
+          "n": 86,
+          "match_rate": 0.7953488372093023
+        },
+        "30-infs": {
+          "n": 29,
+          "match_rate": 0.8551724137931034
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-10503",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 1,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.4793700787401575,
+      "macroF1": 0.8413428605174281,
+      "n_gt_spells": 359,
+      "n_pred_spells": 276,
+      "gt_dur_s": 10.98080438841813,
+      "pred_dur_s": 15.19357521772981,
+      "alive_dead_f1": 0.9287020859479457,
+      "team_acc_both_alive": 0.9083634372322666,
+      "transF1_12": 0.21419975932611313,
+      "transF1_25": 0.35379061371841164,
+      "by_length": {
+        "0-3s": {
+          "n": 133,
+          "match_rate": 0.0887218045112782
+        },
+        "3-10s": {
+          "n": 111,
+          "match_rate": 0.45585585585585586
+        },
+        "10-30s": {
+          "n": 86,
+          "match_rate": 0.7697674418604652
+        },
+        "30-infs": {
+          "n": 29,
+          "match_rate": 0.8137931034482758
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-10506",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 0,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.3423728813559322,
+      "macroF1": 0.6938732374541318,
+      "n_gt_spells": 530,
+      "n_pred_spells": 414,
+      "gt_dur_s": 8.9410164881863,
+      "pred_dur_s": 11.878222828303345,
+      "alive_dead_f1": 0.9046371803731859,
+      "team_acc_both_alive": 0.6894217767625915,
+      "transF1_12": 0.18106995884773663,
+      "transF1_25": 0.2748971193415638,
+      "by_length": {
+        "0-3s": {
+          "n": 189,
+          "match_rate": 0.07195767195767197
+        },
+        "3-10s": {
+          "n": 197,
+          "match_rate": 0.3441624365482233
+        },
+        "10-30s": {
+          "n": 109,
+          "match_rate": 0.5449541284403671
+        },
+        "30-infs": {
+          "n": 35,
+          "match_rate": 0.5942857142857143
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-10506",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 1,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.3443037974683544,
+      "macroF1": 0.6990940217316582,
+      "n_gt_spells": 530,
+      "n_pred_spells": 418,
+      "gt_dur_s": 8.9410164881863,
+      "pred_dur_s": 11.786507400542488,
+      "alive_dead_f1": 0.907416932769483,
+      "team_acc_both_alive": 0.6932388836473202,
+      "transF1_12": 0.17957166392092258,
+      "transF1_25": 0.2817133443163097,
+      "by_length": {
+        "0-3s": {
+          "n": 189,
+          "match_rate": 0.07301587301587302
+        },
+        "3-10s": {
+          "n": 197,
+          "match_rate": 0.349238578680203
+        },
+        "10-30s": {
+          "n": 109,
+          "match_rate": 0.5412844036697247
+        },
+        "30-infs": {
+          "n": 35,
+          "match_rate": 0.6171428571428572
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-3822",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 0,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.5454545454545454,
+      "macroF1": 0.8521810716345769,
+      "n_gt_spells": 305,
+      "n_pred_spells": 245,
+      "gt_dur_s": 13.289026731649683,
+      "pred_dur_s": 17.65643194214623,
+      "alive_dead_f1": 0.9456590128943364,
+      "team_acc_both_alive": 0.9324973049454252,
+      "transF1_12": 0.25613079019073565,
+      "transF1_25": 0.3869209809264305,
+      "by_length": {
+        "0-3s": {
+          "n": 100,
+          "match_rate": 0.12
+        },
+        "3-10s": {
+          "n": 88,
+          "match_rate": 0.4454545454545455
+        },
+        "10-30s": {
+          "n": 73,
+          "match_rate": 0.8027397260273972
+        },
+        "30-infs": {
+          "n": 44,
+          "match_rate": 0.9136363636363636
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-3822",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 1,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.5260869565217392,
+      "macroF1": 0.8482970356483825,
+      "n_gt_spells": 305,
+      "n_pred_spells": 247,
+      "gt_dur_s": 13.289026731649683,
+      "pred_dur_s": 17.576821085593014,
+      "alive_dead_f1": 0.9441743810292265,
+      "team_acc_both_alive": 0.9342011096984955,
+      "transF1_12": 0.2316076294277929,
+      "transF1_25": 0.3869209809264305,
+      "by_length": {
+        "0-3s": {
+          "n": 100,
+          "match_rate": 0.09
+        },
+        "3-10s": {
+          "n": 88,
+          "match_rate": 0.4136363636363637
+        },
+        "10-30s": {
+          "n": 73,
+          "match_rate": 0.8191780821917808
+        },
+        "30-infs": {
+          "n": 44,
+          "match_rate": 0.9090909090909091
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-3829",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 0,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.4670846394984326,
+      "macroF1": 0.8230456932364708,
+      "n_gt_spells": 343,
+      "n_pred_spells": 295,
+      "gt_dur_s": 10.398153255296114,
+      "pred_dur_s": 13.006226565548602,
+      "alive_dead_f1": 0.9140977104741302,
+      "team_acc_both_alive": 0.8741347007198501,
+      "transF1_12": 0.1609467455621302,
+      "transF1_25": 0.2863905325443787,
+      "by_length": {
+        "0-3s": {
+          "n": 110,
+          "match_rate": 0.050909090909090904
+        },
+        "3-10s": {
+          "n": 108,
+          "match_rate": 0.42407407407407405
+        },
+        "10-30s": {
+          "n": 98,
+          "match_rate": 0.7673469387755101
+        },
+        "30-infs": {
+          "n": 27,
+          "match_rate": 0.8296296296296297
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-3829",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 1,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.4771384136858476,
+      "macroF1": 0.8281002253793021,
+      "n_gt_spells": 343,
+      "n_pred_spells": 300,
+      "gt_dur_s": 10.398153255296114,
+      "pred_dur_s": 12.824491157824493,
+      "alive_dead_f1": 0.9173563761560791,
+      "team_acc_both_alive": 0.8766631343459319,
+      "transF1_12": 0.18417945690672963,
+      "transF1_25": 0.34002361275088544,
+      "by_length": {
+        "0-3s": {
+          "n": 110,
+          "match_rate": 0.058181818181818175
+        },
+        "3-10s": {
+          "n": 108,
+          "match_rate": 0.4537037037037037
+        },
+        "10-30s": {
+          "n": 98,
+          "match_rate": 0.7714285714285714
+        },
+        "30-infs": {
+          "n": 27,
+          "match_rate": 0.8296296296296297
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-3834",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 0,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.5565789473684211,
+      "macroF1": 0.8602704756852471,
+      "n_gt_spells": 328,
+      "n_pred_spells": 280,
+      "gt_dur_s": 11.434401881556354,
+      "pred_dur_s": 14.026049859383194,
+      "alive_dead_f1": 0.9263329900088221,
+      "team_acc_both_alive": 0.9232097282690287,
+      "transF1_12": 0.2164821648216482,
+      "transF1_25": 0.3886838868388684,
+      "by_length": {
+        "0-3s": {
+          "n": 107,
+          "match_rate": 0.11962616822429907
+        },
+        "3-10s": {
+          "n": 108,
+          "match_rate": 0.5203703703703704
+        },
+        "10-30s": {
+          "n": 80,
+          "match_rate": 0.865
+        },
+        "30-infs": {
+          "n": 33,
+          "match_rate": 0.9393939393939394
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-3834",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 1,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.5670033670033671,
+      "macroF1": 0.8637441457233054,
+      "n_gt_spells": 328,
+      "n_pred_spells": 266,
+      "gt_dur_s": 11.434401881556354,
+      "pred_dur_s": 14.771914771914773,
+      "alive_dead_f1": 0.9279383396187066,
+      "team_acc_both_alive": 0.9259099720008616,
+      "transF1_12": 0.2227784730913642,
+      "transF1_25": 0.3904881101376721,
+      "by_length": {
+        "0-3s": {
+          "n": 107,
+          "match_rate": 0.11588785046728971
+        },
+        "3-10s": {
+          "n": 108,
+          "match_rate": 0.5351851851851851
+        },
+        "10-30s": {
+          "n": 80,
+          "match_rate": 0.8649999999999999
+        },
+        "30-infs": {
+          "n": 33,
+          "match_rate": 0.8787878787878789
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-3838",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 0,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.5490076335877863,
+      "macroF1": 0.8552622170582437,
+      "n_gt_spells": 364,
+      "n_pred_spells": 291,
+      "gt_dur_s": 9.963993297326631,
+      "pred_dur_s": 13.354247718508887,
+      "alive_dead_f1": 0.9270398465118757,
+      "team_acc_both_alive": 0.9092825387091829,
+      "transF1_12": 0.25462962962962965,
+      "transF1_25": 0.39120370370370366,
+      "by_length": {
+        "0-3s": {
+          "n": 123,
+          "match_rate": 0.1252032520325203
+        },
+        "3-10s": {
+          "n": 120,
+          "match_rate": 0.5183333333333333
+        },
+        "10-30s": {
+          "n": 97,
+          "match_rate": 0.8206185567010309
+        },
+        "30-infs": {
+          "n": 24,
+          "match_rate": 0.9416666666666668
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-3838",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 1,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.547945205479452,
+      "macroF1": 0.8572168445445127,
+      "n_gt_spells": 364,
+      "n_pred_spells": 293,
+      "gt_dur_s": 9.963993297326631,
+      "pred_dur_s": 13.219021068850422,
+      "alive_dead_f1": 0.9315988735502299,
+      "team_acc_both_alive": 0.9034202156617416,
+      "transF1_12": 0.22685185185185186,
+      "transF1_25": 0.3888888888888889,
+      "by_length": {
+        "0-3s": {
+          "n": 123,
+          "match_rate": 0.07967479674796749
+        },
+        "3-10s": {
+          "n": 120,
+          "match_rate": 0.5383333333333333
+        },
+        "10-30s": {
+          "n": 97,
+          "match_rate": 0.8536082474226804
+        },
+        "30-infs": {
+          "n": 24,
+          "match_rate": 0.9500000000000001
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-3841",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 0,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.4533333333333333,
+      "macroF1": 0.8311827780954371,
+      "n_gt_spells": 373,
+      "n_pred_spells": 272,
+      "gt_dur_s": 8.863823609131922,
+      "pred_dur_s": 12.928860232781803,
+      "alive_dead_f1": 0.9124270714638524,
+      "team_acc_both_alive": 0.881387545960316,
+      "transF1_12": 0.22877358490566035,
+      "transF1_25": 0.33254716981132076,
+      "by_length": {
+        "0-3s": {
+          "n": 141,
+          "match_rate": 0.07659574468085106
+        },
+        "3-10s": {
+          "n": 127,
+          "match_rate": 0.4062992125984253
+        },
+        "10-30s": {
+          "n": 80,
+          "match_rate": 0.7625
+        },
+        "30-infs": {
+          "n": 25,
+          "match_rate": 0.9119999999999999
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-3841",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 1,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.4223529411764706,
+      "macroF1": 0.8274945612476107,
+      "n_gt_spells": 373,
+      "n_pred_spells": 307,
+      "gt_dur_s": 8.863823609131922,
+      "pred_dur_s": 11.474884221898337,
+      "alive_dead_f1": 0.9121735519018884,
+      "team_acc_both_alive": 0.8752691627832235,
+      "transF1_12": 0.17792792792792794,
+      "transF1_25": 0.2927927927927928,
+      "by_length": {
+        "0-3s": {
+          "n": 141,
+          "match_rate": 0.0851063829787234
+        },
+        "3-10s": {
+          "n": 127,
+          "match_rate": 0.39842519685039374
+        },
+        "10-30s": {
+          "n": 80,
+          "match_rate": 0.7575000000000001
+        },
+        "30-infs": {
+          "n": 25,
+          "match_rate": 0.816
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-3853",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 0,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.5216216216216216,
+      "macroF1": 0.8452929730868194,
+      "n_gt_spells": 337,
+      "n_pred_spells": 255,
+      "gt_dur_s": 9.666243889784939,
+      "pred_dur_s": 13.835927430698673,
+      "alive_dead_f1": 0.9209065384256049,
+      "team_acc_both_alive": 0.8961459189884773,
+      "transF1_12": 0.19083969465648856,
+      "transF1_25": 0.33587786259541985,
+      "by_length": {
+        "0-3s": {
+          "n": 110,
+          "match_rate": 0.07090909090909092
+        },
+        "3-10s": {
+          "n": 116,
+          "match_rate": 0.47413793103448276
+        },
+        "10-30s": {
+          "n": 86,
+          "match_rate": 0.7930232558139535
+        },
+        "30-infs": {
+          "n": 25,
+          "match_rate": 0.9359999999999999
+        }
+      }
+    },
+    {
+      "source": "pff",
+      "match": "PFF-3853",
+      "fps": 29.97,
+      "combo": 0,
+      "noise_seed": 1,
+      "params": "{\"dead_who\": \"max\"}",
+      "spellF1": 0.5165247018739353,
+      "macroF1": 0.8430121282700852,
+      "n_gt_spells": 337,
+      "n_pred_spells": 250,
+      "gt_dur_s": 9.666243889784939,
+      "pred_dur_s": 14.17937937937938,
+      "alive_dead_f1": 0.9200802483972393,
+      "team_acc_both_alive": 0.8936313135082687,
+      "transF1_12": 0.1966794380587484,
+      "transF1_25": 0.3371647509578544,
+      "by_length": {
+        "0-3s": {
+          "n": 110,
+          "match_rate": 0.0890909090909091
+        },
+        "3-10s": {
+          "n": 116,
+          "match_rate": 0.4224137931034483
+        },
+        "10-30s": {
+          "n": 86,
+          "match_rate": 0.7953488372093023
+        },
+        "30-infs": {
+          "n": 25,
+          "match_rate": 0.9760000000000001
+        }
+      }
+    }
+  ],
+  "mean_by_source": {
+    "idsse": {
+      "spellF1": 0.5017480625041502,
+      "macroF1": 0.8455115607817669,
+      "n": 4
+    },
+    "metrica": {
+      "spellF1": 0.625915057260602,
+      "macroF1": 0.8621712076240693,
+      "n": 2
+    },
+    "pff": {
+      "spellF1": 0.48893575707140874,
+      "macroF1": 0.8262154387110214,
+      "n": 16
+    }
+  }
+}

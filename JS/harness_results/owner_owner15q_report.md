@@ -1,0 +1,126 @@
+# Owner experiments `owner15q` (other games only)
+
+Paired Δ spellF1 = a − b per game × seed; verdict needs |mean| > 2 se. hmm decoder unless noted.
+
+Sanity first: in condition `bar`, layer `dead_v1`, `who_v1` and `nearest` must reproduce EXPERIMENTS #35 on the 11 val games (spellF1 0.516 and 0.309) -- same models, same ball fill, same decoder. If they do not, stop and check the models / bundles before reading anything else.
+
+
+## Condition `bar` (3 games, seeds [0])
+
+Sanity vs #35 (plain mean over games; expect who_v1 0.516, nearest 0.309 on the 11 val games): `nearest` 0.315, `who_v1` 0.555 (3 games)
+
+
+### Layer `oracle`
+
+Top 8 by spellF1 (mean per source, then over sources): `tcn_full_im+bnd0.9` 0.678, `who_v1+tcn_full_imbnd0.5` 0.678, `tcn_full_im+bnd0.5` 0.676, `who_v1` 0.674, `who_v1+tcn_full_imbnd0.9` 0.670, `tcn_full_im` 0.663, `tcn_full_im+override` 0.655, `gbm_full_im+tcn_full_imbnd0.5` 0.652
+
+```
+                        question                             a                 b  a_spellF1  b_spellF1   mean    se wins  verdict  d_idsse  d_metrica  d_pff
+              Q1 rules vs who_v1                          rule            who_v1      0.511      0.674 -0.163 0.012  0/3 b better   -0.141     -0.167 -0.181
+              Q1 rules vs who_v1                     rule_hard            who_v1      0.509      0.674 -0.166 0.013  0/3 b better   -0.142     -0.169 -0.186
+              Q1 rules vs who_v1                      rule_seg            who_v1      0.528      0.674 -0.147 0.015  0/3 b better   -0.130     -0.134 -0.176
+              Q1 rules vs who_v1                          hold            who_v1      0.342      0.674 -0.332 0.044  0/3 b better   -0.244     -0.365 -0.387
+              Q1 rules vs who_v1                      smooth50            who_v1      0.362      0.674 -0.312 0.056  0/3 b better   -0.238     -0.421 -0.277
+              Q1 rules vs who_v1                       nearest            who_v1      0.362      0.674 -0.313 0.043  0/3 b better   -0.247     -0.394 -0.296
+                     Q2 features                    gbm_who_im            who_v1      0.640      0.674 -0.035 0.012  0/3 b better   -0.023     -0.059 -0.022
+                     Q2 features                   gbm_full_im        gbm_who_im      0.650      0.640  0.010 0.017  2/3   no gap    0.010      0.040 -0.020
+                     Q2 features                   gbm_full_im            who_v1      0.650      0.674 -0.025 0.009  0/3 b better   -0.012     -0.019 -0.043
+                     Q2 features                  gbm_stack_im       gbm_full_im      0.647      0.650 -0.003 0.006  1/3   no gap    0.009     -0.013 -0.004
+                  Q4 NN vs trees                   tcn_full_im       gbm_full_im      0.663      0.650  0.014 0.013  2/3   no gap   -0.012      0.029  0.024
+                  Q4 NN vs trees                   tcn_full_im            who_v1      0.663      0.674 -0.011 0.011  1/3   no gap   -0.024      0.010 -0.019
+                  Q4 NN vs trees                   mlp_full_im       gbm_full_im      0.641      0.650 -0.009 0.014  2/3   no gap   -0.037      0.003  0.007
+ Q5 probabilities vs hard labels                        who_v1       who_v1_hard      0.674      0.612  0.062 0.043  2/3   no gap   -0.018      0.075  0.128
+ Q5 probabilities vs hard labels                   gbm_full_im  gbm_full_im_hard      0.650      0.601  0.049 0.037  2/3   no gap   -0.018      0.055  0.109
+ Q5 probabilities vs hard labels                  gbm_stack_im gbm_stack_im_hard      0.647      0.593  0.053 0.033  2/3   no gap   -0.004      0.054  0.110
+ Q5 probabilities vs hard labels                   mlp_full_im  mlp_full_im_hard      0.641      0.605  0.036 0.040  2/3   no gap   -0.041      0.051  0.097
+ Q5 probabilities vs hard labels                   tcn_full_im  tcn_full_im_hard      0.663      0.638  0.025 0.034  2/3   no gap   -0.039      0.039  0.075
+ Q5 probabilities vs hard labels                          rule         rule_hard      0.511      0.509  0.002 0.001  3/3 a better    0.001      0.002  0.004
+         Q6 rule x model hybrids              gbm_full_im+prod       gbm_full_im      0.583      0.650 -0.067 0.005  0/3 b better   -0.061     -0.062 -0.077
+         Q6 rule x model hybrids           gbm_full_im+prod0.5       gbm_full_im      0.620      0.650 -0.029 0.004  0/3 b better   -0.021     -0.035 -0.032
+         Q6 rule x model hybrids          gbm_full_im+override       gbm_full_im      0.647      0.650 -0.003 0.005  2/3   no gap    0.003     -0.013  0.002
+         Q6 rule x model hybrids              gbm_full_im+veto       gbm_full_im      0.617      0.650 -0.033 0.013  0/3 b better   -0.054     -0.036 -0.009
+         Q6 rule x model hybrids              tcn_full_im+prod       tcn_full_im      0.612      0.663 -0.052 0.001  0/3 b better   -0.049     -0.053 -0.053
+         Q6 rule x model hybrids           tcn_full_im+prod0.5       tcn_full_im      0.642      0.663 -0.021 0.003  0/3 b better   -0.026     -0.020 -0.017
+         Q6 rule x model hybrids          tcn_full_im+override       tcn_full_im      0.655      0.663 -0.008 0.011  2/3   no gap    0.003     -0.030  0.002
+         Q6 rule x model hybrids              tcn_full_im+veto       tcn_full_im      0.631      0.663 -0.032 0.016  0/3   no gap   -0.042     -0.054 -0.000
+Q7 TCN boundaries in the decoder            tcn_full_im+bnd0.5       tcn_full_im      0.676      0.663  0.012 0.005  3/3 a better    0.021      0.010  0.005
+Q7 TCN boundaries in the decoder            tcn_full_im+bnd0.9       tcn_full_im      0.678      0.663  0.015 0.018  2/3   no gap    0.050      0.006 -0.012
+Q7 TCN boundaries in the decoder      who_v1+tcn_full_imbnd0.5            who_v1      0.678      0.674  0.003 0.017  2/3   no gap    0.024      0.016 -0.031
+Q7 TCN boundaries in the decoder      who_v1+tcn_full_imbnd0.9            who_v1      0.670      0.674 -0.004 0.024  2/3   no gap    0.031      0.006 -0.049
+Q7 TCN boundaries in the decoder gbm_full_im+tcn_full_imbnd0.5       gbm_full_im      0.652      0.650  0.003 0.006  2/3   no gap    0.014      0.003 -0.008
+Q7 TCN boundaries in the decoder gbm_full_im+tcn_full_imbnd0.9       gbm_full_im      0.652      0.650  0.003 0.020  2/3   no gap    0.038      0.001 -0.031
+```
+
+
+### Layer `dead_v1`
+
+Top 8 by spellF1 (mean per source, then over sources): `who_v1+tcn_full_imbnd0.5` 0.561, `tcn_full_im+bnd0.9` 0.560, `tcn_full_im+bnd0.5` 0.560, `who_v1` 0.555, `who_v1+tcn_full_imbnd0.9` 0.553, `gbm_full_im+tcn_full_imbnd0.9` 0.544, `gbm_full_im+tcn_full_imbnd0.5` 0.543, `tcn_full_im` 0.541
+
+```
+                        question                             a                 b  a_spellF1  b_spellF1   mean    se wins  verdict  d_idsse  d_metrica  d_pff
+              Q1 rules vs who_v1                          rule            who_v1      0.430      0.555 -0.125 0.013  0/3 b better   -0.102     -0.128 -0.146
+              Q1 rules vs who_v1                     rule_hard            who_v1      0.429      0.555 -0.126 0.014  0/3 b better   -0.102     -0.128 -0.149
+              Q1 rules vs who_v1                      rule_seg            who_v1      0.433      0.555 -0.122 0.013  0/3 b better   -0.099     -0.123 -0.143
+              Q1 rules vs who_v1                          hold            who_v1      0.285      0.555 -0.269 0.032  0/3 b better   -0.205     -0.306 -0.297
+              Q1 rules vs who_v1                      smooth50            who_v1      0.300      0.555 -0.255 0.049  0/3 b better   -0.195     -0.351 -0.218
+              Q1 rules vs who_v1                       nearest            who_v1      0.315      0.555 -0.240 0.042  0/3 b better   -0.201     -0.324 -0.194
+                     Q2 features                    gbm_who_im            who_v1      0.521      0.555 -0.034 0.006  0/3 b better   -0.032     -0.045 -0.024
+                     Q2 features                   gbm_full_im        gbm_who_im      0.531      0.521  0.009 0.015  2/3   no gap    0.013      0.033 -0.017
+                     Q2 features                   gbm_full_im            who_v1      0.531      0.555 -0.024 0.009  0/3 b better   -0.019     -0.012 -0.042
+                     Q2 features                  gbm_stack_im       gbm_full_im      0.530      0.531 -0.000 0.001  1/3   no gap    0.002     -0.001 -0.003
+                  Q4 NN vs trees                   tcn_full_im       gbm_full_im      0.541      0.531  0.010 0.011  2/3   no gap   -0.011      0.028  0.014
+                  Q4 NN vs trees                   tcn_full_im            who_v1      0.541      0.555 -0.014 0.015  1/3   no gap   -0.030      0.015 -0.028
+                  Q4 NN vs trees                   mlp_full_im       gbm_full_im      0.525      0.531 -0.005 0.013  1/3   no gap   -0.030     -0.001  0.015
+ Q5 probabilities vs hard labels                        who_v1       who_v1_hard      0.555      0.528  0.027 0.013  3/3 a better    0.002      0.041  0.038
+ Q5 probabilities vs hard labels                   gbm_full_im  gbm_full_im_hard      0.531      0.516  0.014 0.017  2/3   no gap   -0.017      0.040  0.020
+ Q5 probabilities vs hard labels                  gbm_stack_im gbm_stack_im_hard      0.530      0.515  0.015 0.017  2/3   no gap   -0.018      0.041  0.022
+ Q5 probabilities vs hard labels                   mlp_full_im  mlp_full_im_hard      0.525      0.517  0.008 0.023  2/3   no gap   -0.037      0.031  0.031
+ Q5 probabilities vs hard labels                   tcn_full_im  tcn_full_im_hard      0.541      0.540  0.001 0.023  2/3   no gap   -0.045      0.032  0.015
+ Q5 probabilities vs hard labels                          rule         rule_hard      0.430      0.429  0.001 0.001  2/3   no gap    0.000     -0.001  0.003
+         Q6 rule x model hybrids              gbm_full_im+prod       gbm_full_im      0.480      0.531 -0.050 0.007  0/3 b better   -0.038     -0.052 -0.061
+         Q6 rule x model hybrids           gbm_full_im+prod0.5       gbm_full_im      0.513      0.531 -0.018 0.005  0/3 b better   -0.007     -0.024 -0.023
+         Q6 rule x model hybrids          gbm_full_im+override       gbm_full_im      0.526      0.531 -0.004 0.003  0/3   no gap   -0.000     -0.010 -0.002
+         Q6 rule x model hybrids              gbm_full_im+veto       gbm_full_im      0.502      0.531 -0.028 0.009  0/3 b better   -0.038     -0.035 -0.011
+         Q6 rule x model hybrids              tcn_full_im+prod       tcn_full_im      0.501      0.541 -0.040 0.007  0/3 b better   -0.027     -0.052 -0.040
+         Q6 rule x model hybrids           tcn_full_im+prod0.5       tcn_full_im      0.526      0.541 -0.015 0.008  1/3   no gap   -0.016     -0.028  0.001
+         Q6 rule x model hybrids          tcn_full_im+override       tcn_full_im      0.534      0.541 -0.007 0.009  1/3   no gap    0.004     -0.026 -0.000
+         Q6 rule x model hybrids              tcn_full_im+veto       tcn_full_im      0.511      0.541 -0.029 0.016  0/3   no gap   -0.029     -0.057 -0.001
+Q7 TCN boundaries in the decoder            tcn_full_im+bnd0.5       tcn_full_im      0.560      0.541  0.020 0.005  3/3 a better    0.022      0.009  0.027
+Q7 TCN boundaries in the decoder            tcn_full_im+bnd0.9       tcn_full_im      0.560      0.541  0.020 0.012  2/3   no gap    0.040     -0.001  0.021
+Q7 TCN boundaries in the decoder      who_v1+tcn_full_imbnd0.5            who_v1      0.561      0.555  0.006 0.007  2/3   no gap    0.007      0.018 -0.005
+Q7 TCN boundaries in the decoder      who_v1+tcn_full_imbnd0.9            who_v1      0.553      0.555 -0.001 0.013  2/3   no gap    0.011      0.012 -0.027
+Q7 TCN boundaries in the decoder gbm_full_im+tcn_full_imbnd0.5       gbm_full_im      0.543      0.531  0.013 0.003  3/3 a better    0.013      0.008  0.018
+Q7 TCN boundaries in the decoder gbm_full_im+tcn_full_imbnd0.9       gbm_full_im      0.544      0.531  0.014 0.010  2/3   no gap    0.030     -0.004  0.014
+```
+
+
+### Per alive frame (calibration)
+
+```
+                        acc    auc  logloss  brier    ece
+method                                                   
+tcn_full_im           0.919  0.976    0.202  0.059  0.015
+who_v1                0.917  0.976    0.203  0.060  0.014
+tcn_full_im+override  0.918  0.972    0.211  0.061  0.013
+tcn_full_im+prod0.5   0.915  0.974    0.218  0.063  0.031
+mlp_full_im           0.913  0.971    0.219  0.064  0.016
+gbm_stack_im          0.911  0.970    0.229  0.066  0.028
+gbm_full_im           0.910  0.970    0.232  0.067  0.029
+gbm_full_im+override  0.909  0.964    0.238  0.068  0.024
+gbm_who_im            0.906  0.968    0.239  0.069  0.028
+gbm_full_im+prod0.5   0.904  0.967    0.243  0.072  0.023
+tcn_full_im+prod      0.906  0.971    0.257  0.073  0.052
+gbm_full_im+prod      0.891  0.961    0.288  0.083  0.058
+tcn_full_im_hard      0.919  0.918    0.336  0.078  0.061
+who_v1_hard           0.917  0.915    0.341  0.080  0.063
+mlp_full_im_hard      0.913  0.910    0.359  0.084  0.067
+gbm_stack_im_hard     0.911  0.907    0.368  0.086  0.069
+rule                  0.856  0.905    0.371  0.112  0.019
+gbm_full_im_hard      0.910  0.907    0.372  0.087  0.070
+nearest               0.724  0.807    0.572  0.183  0.080
+rule_hard             0.856  0.851    0.580  0.139  0.124
+hold                  0.809  0.807    0.763  0.191  0.191
+smooth50              0.778  0.784    0.843  0.206  0.189
+```
+
+Accuracy where the ball is NOT tracked: `gbm_who_im` 0.736, `gbm_full_im` 0.734, `gbm_full_im_hard` 0.734, `gbm_full_im+override` 0.734, `gbm_stack_im_hard` 0.731, `gbm_stack_im` 0.731, `who_v1_hard` 0.729, `who_v1` 0.729, `tcn_full_im+override` 0.722, `tcn_full_im` 0.722

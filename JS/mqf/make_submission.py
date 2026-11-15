@@ -1,15 +1,19 @@
 """Regenerate our submission: tracking (+ Smart Tagging) -> features -> HMM decode -> CSV.
 
-    python -m mqf.make_submission --team <team_name>      # real match (data/ or MTAH_DATA_DIR)
-    python -m mqf.make_submission --team <team_name> --reproduce   # regenerate + byte-compare (any OS)
+    python -m mqf.make_submission --team <team_name> --final  # THE submission: the frozen recipe FINAL below
+    python -m mqf.make_submission --team <team_name> --final --reproduce   # regenerate + byte-compare (any OS)
+    python -m mqf.make_submission --team <team_name>      # v0 (no models), real match (data/ or MTAH_DATA_DIR)
     python -m mqf.make_submission --synthetic             # synthetic match, no data needed
     python -m mqf.make_submission --team <team_name> --ball-fill   # + missing ball filled (needs torch, CPU ok)
     python -m mqf.make_submission --team <team_name> --dead-model models/dead_v1.joblib   # + learned P(dead)
     python -m mqf.make_submission --team <team_name> --who-model models/who_v1.joblib     # + learned P(home | alive)
+    python -m mqf.make_submission --team <team_name> ... --params dead_who=max       # decoder overrides (decode.Params)
 
 Writes results/<team>.csv (+ .json run report) and runs the OFFICIAL validator.
-Deterministic: same data + same code -> byte-identical file. The run options are saved in the .json
-report and --reproduce reuses them. --ball-fill runs the frozen ball model (mqf.ball.impute.FROZEN)
+Deterministic: same data + same code -> byte-identical file. The run options and decoder parameters
+are saved in the .json report and --reproduce reuses them; with no report next to the file (a fresh
+clone with the submitted CSV copied to results/<team>.csv) it uses the flags given, so
+`--final --reproduce` checks the submitted file from the data bundle and the repository alone. --ball-fill runs the frozen ball model (mqf.ball.impute.FROZEN)
 on the CPU in float64 and rounds filled positions to 1 cm, so last-bit differences between machines
 cannot change a label.
 """
@@ -18,13 +22,69 @@ from __future__ import annotations
 import argparse
 import json
 import time
-from dataclasses import asdict
+from dataclasses import asdict, fields, replace
 from pathlib import Path
 
 import numpy as np
 
 from . import atd, decode, features, smart_tagging, submission
-from .config import CACHE_DIR, MODELS_DIR, RESULTS_DIR, SYNTHETIC_DIR, competition_game
+from .config import CACHE_DIR, MODELS_DIR, RESULTS_DIR, ROOT, SYNTHETIC_DIR, competition_game
+
+# The submitted configuration (docs/EXPERIMENTS.md #35-#39): learned P(home | alive) and P(dead), the frozen
+# ball fill, the tracklet cleaner and Smart Tagging; the decoder as validated (dead_who="max", #34/#35).
+# Model paths are relative to the package root (JS/). Change it only with a new EXPERIMENTS entry.
+FINAL = {"options": {"use_tags": True, "clean_tracks": True, "ball_fill": True, "ball_model": None,
+                     "dead_model": "models/dead_v1.joblib", "who_model": "models/who_v1.joblib"},
+         "params": {"dead_who": "max"}}
+_PATH_OPTS = ("ball_model", "dead_model", "who_model")
+
+
+def parse_params(items) -> dict:
+    """["dead_who=max", "w_tags=0.4"] -> decode.Params overrides, typed like the dataclass fields."""
+    types = {f.name: type(f.default) for f in fields(decode.Params)}
+    out = {}
+    for it in items or []:
+        k, eq, v = it.partition("=")
+        if not eq or k not in types:
+            raise SystemExit(f"--params: expected key=value with key in decode.Params ({', '.join(types)}), got {it!r}")
+        out[k] = types[k](v)
+    if out.get("dead_who", "zero") not in ("zero", "max"):
+        raise SystemExit(f"--params: dead_who must be zero or max, got {out['dead_who']!r}")
+    return out
+
+
+def _model_file(p) -> Path | None:
+    """A model path as given, or under the package root when relative and not found from here."""
+    if p is None:
+        return None
+    p = Path(p)
+    return p if p.is_absolute() or p.exists() else ROOT / p
+
+
+def settings(args, saved: dict | None = None) -> tuple[dict, decode.Params]:
+    """(options for run(), decoder Params) from the command line -- or from a saved run report (--reproduce)."""
+    if saved:
+        opts = {**saved["options"]}
+        unknown = sorted(set(saved.get("params", {})) - {f.name for f in fields(decode.Params)})
+        if unknown:
+            raise SystemExit(f"the reference report has decoder parameters this code does not know: {unknown}")
+        params = decode.Params(**saved.get("params", {}))
+    elif args.final:
+        given = [f for f in ("no_tags", "clean_tracks", "ball_fill", "ball_model", "dead_model", "who_model", "params")
+                 if getattr(args, f)]
+        if given:
+            raise SystemExit(f"--final is the frozen recipe; drop {', '.join('--' + g.replace('_', '-') for g in given)}")
+        opts, params = {**FINAL["options"]}, replace(decode.Params(), **FINAL["params"])
+    else:
+        opts = {"use_tags": not args.no_tags, "clean_tracks": args.clean_tracks, "ball_fill": args.ball_fill,
+                "ball_model": args.ball_model, "dead_model": args.dead_model, "who_model": args.who_model}
+        params = replace(decode.Params(), **parse_params(args.params))
+    return {k: (Path(v) if k in _PATH_OPTS and v else v) for k, v in opts.items()}, params
+
+
+def _non_default(params: decode.Params) -> dict:
+    base = asdict(decode.Params())
+    return {k: v for k, v in asdict(params).items() if base[k] != v}
 
 
 def fill_ball(trk: atd.Tracking, spec, model_path: Path | None = None):
@@ -65,16 +125,16 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
         trk, clean_report = tracks.clean(trk, spec.fps, spec.pitch, kickoff_windows=windows, halves=spec.halves)
     filled, fill_report = None, None
     if ball_fill:
-        trk, filled, fill_report = fill_ball(trk, spec, ball_model)
+        trk, filled, fill_report = fill_ball(trk, spec, _model_file(ball_model))
     p_dead = None
     if dead_model:
         from . import dead
-        p_dead = dead.predict(dead.load_model(dead_model), trk.players, trk.team_of_slot, spec.fps, spec.pitch,
+        p_dead = dead.predict(dead.load_model(_model_file(dead_model)), trk.players, trk.team_of_slot, spec.fps, spec.pitch,
                               spec.halves)
     p_home = None
     if who_model:                     # reads the ball as the decoder gets it (filled when --ball-fill)
         from . import who
-        p_home = who.predict(who.load_model(who_model), trk.players, trk.team_of_slot, trk.ball, spec.fps,
+        p_home = who.predict(who.load_model(_model_file(who_model)), trk.players, trk.team_of_slot, trk.ball, spec.fps,
                              spec.pitch, spec.halves)
     feat = features.build(trk, spec.pitch, spec.fps, ball_filled=filled, p_dead=p_dead, p_home=p_home)
     tags = None
@@ -90,9 +150,9 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
               "dead_share_model": None if p_dead is None else round(float(np.mean(p_dead[~np.isnan(p_dead)] >= 0.5)), 3),
               "home_share_model": None if p_home is None else round(float(np.mean(p_home[~np.isnan(p_home)] >= 0.5)), 3),
               "options": {"use_tags": use_tags, "clean_tracks": clean_tracks, "ball_fill": ball_fill,
-                          "ball_model": str(ball_model) if ball_model else None,
-                          "dead_model": str(dead_model) if dead_model else None,
-                          "who_model": str(who_model) if who_model else None},
+                          "ball_model": Path(ball_model).as_posix() if ball_model else None,
+                          "dead_model": Path(dead_model).as_posix() if dead_model else None,
+                          "who_model": Path(who_model).as_posix() if who_model else None},
               "params": asdict(params)}
     Path(out).with_suffix(".json").write_text(json.dumps(report, indent=2))
     return report
@@ -101,6 +161,7 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--team", default="Perosinho_FC", help="file is named after the team")
+    ap.add_argument("--final", action="store_true", help="the submitted recipe (FINAL in this file); no other option flags")
     ap.add_argument("--synthetic", action="store_true", help="generate and use the synthetic match")
     ap.add_argument("--no-tags", action="store_true", help="ablation: ignore Smart Tagging")
     ap.add_argument("--clean-tracks", action="store_true", help="team-level tracklet cleaning (mqf.tracks) before features")
@@ -108,6 +169,7 @@ def main():
     ap.add_argument("--ball-model", type=Path, default=None, help="override the frozen ball model file")
     ap.add_argument("--dead-model", type=Path, default=None, help="learned P(dead) (mqf.dead), e.g. models/dead_v1.joblib")
     ap.add_argument("--who-model", type=Path, default=None, help="learned P(home | alive) (mqf.who), e.g. models/who_v1.joblib")
+    ap.add_argument("--params", nargs="*", default=[], metavar="KEY=VALUE", help="decoder overrides, e.g. dead_who=max")
     ap.add_argument("--out", type=Path, help="override output path")
     ap.add_argument("--reproduce", action="store_true",
                     help="regenerate into cache/reproduce/ and check it is byte-identical to results/<team>.csv")
@@ -128,17 +190,18 @@ def main():
             if not reference.exists():
                 raise SystemExit(f"nothing to compare against: {reference} does not exist")
 
-    opts = {"use_tags": not args.no_tags, "clean_tracks": args.clean_tracks, "ball_fill": args.ball_fill,
-            "ball_model": args.ball_model, "dead_model": args.dead_model, "who_model": args.who_model}
-    if args.reproduce and not args.synthetic and reference.with_suffix(".json").exists():   # options of the reference
-        saved = json.loads(reference.with_suffix(".json").read_text()).get("options")
-        if saved:
-            opts = {**saved, "ball_model": Path(saved["ball_model"]) if saved.get("ball_model") else None,
-                    "dead_model": Path(saved["dead_model"]) if saved.get("dead_model") else None,
-                    "who_model": Path(saved["who_model"]) if saved.get("who_model") else None}
-            print(f"reproducing with the reference's options: {saved}")
-    report = run(spec, decode.Params(), out, **opts)
-    print(json.dumps({k: v for k, v in report.items() if k != "params"}, indent=2))
+    saved = None
+    if args.reproduce and not args.synthetic and reference.with_suffix(".json").exists():   # how the reference was made
+        saved = json.loads(reference.with_suffix(".json").read_text())
+        if not saved.get("options"):
+            saved = None
+    opts, params = settings(args, saved)
+    if saved:
+        print(f"reproducing with the reference's options {saved['options']} and decoder parameters "
+              f"(non-default: {_non_default(params)})")
+    report = run(spec, params, out, **opts)
+    print(json.dumps({**{k: v for k, v in report.items() if k != "params"},
+                      "params_non_default": _non_default(params)}, indent=2))
     if args.synthetic:
         return
     if args.reproduce:

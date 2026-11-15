@@ -97,3 +97,80 @@ def test_compare_resolves_names_and_reports_missing(tmp_path, monkeypatch):
     with pytest.raises(SystemExit) as e:
         compare.resolve("results/Perosinho_FC.csv", res)
     assert "base_v0.csv" in str(e.value) and "tasks.py submit" in str(e.value)
+
+
+# --- the submitted recipe: --final, --params, and --reproduce from a saved report -------------------------
+
+def _args(**kw):
+    import argparse
+    base = dict(final=False, no_tags=False, clean_tracks=False, ball_fill=False, ball_model=None, dead_model=None,
+                who_model=None, params=[])
+    return argparse.Namespace(**{**base, **kw})
+
+
+def test_parse_params_types_and_errors():
+    import pytest
+    p = make_submission.parse_params(["dead_who=max", "switch_cost=20", "w_tags=0.25"])
+    assert p == {"dead_who": "max", "switch_cost": 20.0, "w_tags": 0.25}
+    assert isinstance(p["switch_cost"], float)
+    for bad in (["nope=1"], ["dead_who"], ["dead_who=both"]):
+        with pytest.raises(SystemExit):
+            make_submission.parse_params(bad)
+
+
+def test_settings_final_and_flags():
+    import pytest
+    from pathlib import Path
+    opts, params = make_submission.settings(_args(final=True))
+    assert params.dead_who == "max" and params.switch_cost == decode.Params().switch_cost
+    assert opts["clean_tracks"] and opts["ball_fill"] and opts["use_tags"]
+    assert opts["who_model"] == Path("models/who_v1.joblib") and opts["dead_model"] == Path("models/dead_v1.joblib")
+    with pytest.raises(SystemExit):                      # the recipe is frozen: no mixing with option flags
+        make_submission.settings(_args(final=True, clean_tracks=True))
+    with pytest.raises(SystemExit):
+        make_submission.settings(_args(final=True, params=["dead_who=zero"]))
+    opts, params = make_submission.settings(_args(ball_fill=True, params=["dead_who=max"]))
+    assert opts["ball_fill"] and not opts["clean_tracks"] and params.dead_who == "max"
+
+
+def test_reproduce_reuses_saved_params(syn_spec, tmp_path):
+    """--reproduce rebuilds with the reference report's decoder parameters, not the defaults."""
+    import json
+    import pytest
+    from dataclasses import replace
+    ref = tmp_path / "ref.csv"
+    params = replace(decode.Params(), switch_cost=30.0, to_dead_cost=6.0)     # visibly different labels
+    make_submission.run(syn_spec, params, ref)
+    saved = json.loads(ref.with_suffix(".json").read_text())
+    opts, again_params = make_submission.settings(_args(final=True), saved)  # the report wins over the flags
+    assert again_params == params and opts["clean_tracks"] is False
+    again = tmp_path / "again.csv"
+    make_submission.run(syn_spec, again_params, again, **opts)
+    assert again.read_bytes() == ref.read_bytes()
+    default = tmp_path / "default.csv"
+    make_submission.run(syn_spec, decode.Params(), default, **opts)
+    assert default.read_bytes() != ref.read_bytes()      # ... so reusing the defaults would have failed
+    saved["params"]["not_a_param"] = 1
+    with pytest.raises(SystemExit):
+        make_submission.settings(_args(), saved)
+
+
+def test_final_recipe_runs_and_is_deterministic(official, tmp_path):
+    """FINAL end to end (models, ball fill, cleaner, tags) on a short synthetic match, twice, byte-identical."""
+    import json
+    import pytest
+    from mqf.config import ROOT
+    pytest.importorskip("torch")
+    pytest.importorskip("sklearn")
+    if not all((ROOT / m).is_file() for m in ("models/dead_v1.joblib", "models/who_v1.joblib", "models/ball_B_off_v5.pt")):
+        pytest.skip("submitted models not in models/")
+    spec = synthetic.generate(tmp_path / "short", n_frames=9_000, halves=((1, 300, 4_199), (2, 4_700, 8_699)))
+    opts, params = make_submission.settings(_args(final=True))
+    a, b = tmp_path / "a.csv", tmp_path / "b.csv"
+    rep = make_submission.run(spec, params, a, **opts)
+    make_submission.run(spec, params, b, **opts)
+    assert a.read_bytes() == b.read_bytes()
+    saved = json.loads(a.with_suffix(".json").read_text())
+    assert saved["options"]["who_model"] == "models/who_v1.joblib"          # recorded as given, portable
+    assert saved["params"]["dead_who"] == "max" and rep["used_tags"]
+    assert make_submission.settings(_args(), saved) == (opts, params)

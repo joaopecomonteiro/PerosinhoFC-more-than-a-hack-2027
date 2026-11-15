@@ -2,7 +2,7 @@
 
     python tasks.py help
     python tasks.py setup                          # install-dev + bootstrap + test
-    python tasks.py submit --team Perosinho_FC     # real match -> results/<team>.csv, validated
+    python tasks.py submit --team Perosinho_FC     # real match, the submitted recipe -> results/<team>.csv, validated
     python tasks.py harness -- --noise jitter_corr_s=1.0     # args after -- go to the command
 
 Runs from anywhere (it switches to this folder). Targets marked [REAL DATA] read the match bundle:
@@ -251,6 +251,13 @@ def train_dead(a, extra):
     run(PY, "-m", "mqf.dead", "train", "--tag", a.tag, *extra)
 
 
+@task("owner-suite")
+def owner_suite(a, extra):
+    """Who-owns-the-ball experiments #38 (rules, GBM, NN, hard vs prob, hybrids), e.g. -- --quick."""
+    _need_torch()
+    run(PY, "-m", "mqf.owner.suite", *extra)
+
+
 @task("eval-ball")
 def eval_ball(a, extra):
     """Ball protocol on the validation games: buckets, team-nearest agreement, downstream spellF1."""
@@ -281,8 +288,9 @@ def baseline(a, extra):
 
 @task("submit", real=True)
 def submit(a, extra):
-    """Build results/<team>.csv from the real match and run the official validator on it."""
-    run(PY, "-m", "mqf.make_submission", "--team", a.team, *extra)
+    """Build results/<team>.csv with the submitted recipe (make_submission --final) and validate it."""
+    # `python tasks.py submit -- --who-model ...` builds something else instead (args after -- replace --final)
+    run(PY, "-m", "mqf.make_submission", "--team", a.team, *(extra or ["--final"]))
 
 
 @task("check", real=True)
@@ -296,7 +304,9 @@ def check(a, extra):
 @task("reproduce", real=True)
 def reproduce(a, extra):
     """Regenerate results/<team>.csv into cache/reproduce/ and byte-compare."""
-    run(PY, "-m", "mqf.make_submission", "--team", a.team, "--reproduce")
+    # with results/<team>.json it reuses that run's options; without it (fresh clone + the submitted CSV
+    # copied to results/<team>.csv) it rebuilds with the submitted recipe
+    run(PY, "-m", "mqf.make_submission", "--team", a.team, "--reproduce", "--final")
 
 
 @task("profile", real=True)
