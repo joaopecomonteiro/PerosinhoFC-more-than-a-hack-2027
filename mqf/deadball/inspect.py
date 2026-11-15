@@ -2,6 +2,8 @@
 
     python -m mqf.deadball.inspect --half 1 --from 1:06 --to 1:13       # exact range, a row every 0.2 s
     python -m mqf.deadball.inspect --half 1 --at 5:17                   # +/- 15 s around a moment
+    python -m mqf.deadball.inspect --csv --tag v3                       # the public window, every frame -> reports/deadball/
+    python -m mqf.deadball.inspect --csv --all-inputs --tag v3          # ... with all model inputs as columns
 
 The clock is the viewer's ("1st half 05:17" = 5 min 17 s after the half's first graded frame).
 This prints real values of the competition match (positions, speeds, probabilities): never paste
@@ -39,7 +41,7 @@ from . import decoder, features, model
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
-    ap.add_argument("--half", type=int, required=True, choices=[1, 2])
+    ap.add_argument("--half", type=int, default=1, choices=[1, 2])
     ap.add_argument("--at", help="mm:ss on the viewer's half clock (with --window)")
     ap.add_argument("--from", dest="t_from", help="mm:ss: start of an exact range")
     ap.add_argument("--to", dest="t_to", help="mm:ss: end of an exact range")
@@ -47,7 +49,15 @@ def main(argv=None) -> int:
     ap.add_argument("--step", type=float, default=0.2, help="seconds between rows")
     ap.add_argument("--tag", default="v1")
     ap.add_argument("--w", type=float, default=0.2)
+    ap.add_argument("--csv", action="store_true",
+                    help="write the table to reports/deadball/ instead of printing it (default range: the public "
+                         "window, 1st half 0:00-5:00; every frame unless --step is given)")
+    ap.add_argument("--all-inputs", action="store_true", help="with --csv: add every model input as a column")
     a = ap.parse_args(argv)
+    if a.csv and not (a.t_from or a.at):
+        a.half, a.t_from, a.t_to = 1, "0:00", "5:00"
+    if a.csv and "--step" not in (argv if argv is not None else sys.argv[1:]):
+        a.step = 1.0 / 25
     if sys.stdout.isatty() is False:
         print("note: output is not a terminal -- do not paste it into an AI chat", file=sys.stderr)
 
@@ -90,22 +100,45 @@ def main(argv=None) -> int:
     bsp = X["b_speed"].to_numpy()
     k4 = max(1, int(round(0.4 * fps)))
     step = max(1, int(round(a.step * fps)))
-    print("LOCAL ONLY -- real match values, never paste into an AI chat\n")
-    print(f"{'clock':>12} {'truth':>5} {'p_dead':>6} {'p_pl':>5} {'dead':>4} {'ball':>4} {'ball_xy':>11} {'b_speed':>7} {'b_acc':>6} "
-          f"{'still_s':>7} {'to_line':>7} {'gap_s':>6} {'pl_speed':>8} {'slow':>5} {'near_m':>6} {'in9m':>4} {'dspeed1s':>8}")
+    rows = []
     for f in range(lo, hi + 1, step):
         t = (f - half[0]) / fps
         bx, by = trk.ball[f]
         seen = not np.isnan(bx)
         d = np.linalg.norm(trk.players[f] - trk.ball[f], axis=-1) if seen else np.array([np.nan])
-        near = np.nanmin(d) if seen and np.isfinite(d).any() else np.nan
-        in9 = str(int(np.nansum(d < 9.15))) if seen else "-"     # no ball: unknown, not "nobody near"
-        mark = " <" if centre is not None and abs(f - centre) < step / 2 else ""
-        acc = bsp[f] - bsp[f - k4] if f >= k4 else np.nan
-        print(f"{a.half}H {int(t // 60):02d}:{t % 60:04.1f} {truth[f]:>5} {p[f]:6.2f} {pp[f]:5.2f} {int(dead[f]):4d} {'yes' if seen else '-':>4} "
-              f"{(f'{bx:5.1f},{by:4.1f}' if seen else '-'):>11} {bsp[f]:7.1f} {acc:6.1f} {still_run[f]:7.1f} {X['b_dline'][f]:7.1f} "
-              f"{X['b_gap_s'][f]:6.1f} {X['speed_mean'][f]:8.2f} {X['share_slow'][f]:5.2f} {near:6.1f} {in9:>4} "
-              f"{X['e_dspeed_1s'][f]:8.2f}{mark}")
+        near = float(np.nanmin(d)) if seen and np.isfinite(d).any() else np.nan
+        row = {"frame": f, "clock": f"{a.half}H {int(t // 60):02d}:{t % 60:05.2f}", "truth": truth[f].strip(),
+               "p_dead": p[f], "p_pl": pp[f], "dead": int(dead[f]), "ball": int(seen),
+               "ball_x": bx if seen else np.nan, "ball_y": by if seen else np.nan, "b_speed": bsp[f],
+               "b_acc": bsp[f] - bsp[f - k4] if f >= k4 else np.nan, "still_s": still_run[f],
+               "to_line": X["b_dline"][f], "gap_s": X["b_gap_s"][f], "pl_speed": X["speed_mean"][f],
+               "slow": X["share_slow"][f], "near_m": near,
+               "in9m": int(np.nansum(d < 9.15)) if seen else np.nan,      # no ball: unknown, not "nobody near"
+               "dspeed1s": X["e_dspeed_1s"][f]}
+        if a.csv and a.all_inputs:
+            row.update({f"x_{c}": X[c][f] for c in m["columns"]})
+        rows.append(row)
+    if a.csv:
+        import pandas as pd
+        from ..config import REPORTS_DIR
+        out = REPORTS_DIR / "deadball" / (f"inspect_{a.tag}_{a.half}H_{a.t_from or a.at}_{a.t_to or ''}"
+                                          .replace(":", "m").rstrip("_") + ".csv")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(rows).to_csv(out, index=False, float_format="%.4f")
+        print(f"wrote {out}  ({len(rows)} rows) -- LOCAL ONLY: open it yourself, never paste it into an AI chat")
+        return 0
+    print("LOCAL ONLY -- real match values, never paste into an AI chat\n")
+    print(f"{'clock':>12} {'truth':>5} {'p_dead':>6} {'p_pl':>5} {'dead':>4} {'ball':>4} {'ball_xy':>11} {'b_speed':>7} {'b_acc':>6} "
+          f"{'still_s':>7} {'to_line':>7} {'gap_s':>6} {'pl_speed':>8} {'slow':>5} {'near_m':>6} {'in9m':>4} {'dspeed1s':>8}")
+    for r in rows:
+        mark = " <" if centre is not None and abs(r["frame"] - centre) < step / 2 else ""
+        seen = r["ball"] == 1
+        xy = f"{r['ball_x']:5.1f},{r['ball_y']:4.1f}" if seen else "-"
+        in9 = str(int(r["in9m"])) if seen else "-"
+        print(f"{r['clock'][:11]:>12} {r['truth'] or ' ':>5} {r['p_dead']:6.2f} {r['p_pl']:5.2f} {r['dead']:4d} "
+              f"{'yes' if seen else '-':>4} {xy:>11} {r['b_speed']:7.1f} {r['b_acc']:6.1f} {r['still_s']:7.1f} "
+              f"{r['to_line']:7.1f} {r['gap_s']:6.1f} {r['pl_speed']:8.2f} {r['slow']:5.2f} {r['near_m']:6.1f} "
+              f"{in9:>4} {r['dspeed1s']:8.2f}{mark}")
     return 0
 
 

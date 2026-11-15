@@ -62,6 +62,11 @@ def games(condition: str, seeds, stoppage_loss: float):
                 rng = np.random.default_rng([seed, 77, zlib.crc32(spec.name.encode())])
                 b = model.hide_stoppage_ball(trk.ball.astype(np.float64), gt, stoppage_loss, rng)
                 yield source, spec, model.with_ball(trk, b), gt, clean
+    elif condition == "kept":
+        for source in ("idsse", "metrica"):
+            for d, seed in itertools.product(bundle.find(source, splits.games("val", sources=[source])), seeds):
+                spec, trk, gt = load(d, noise_cfg=replace(parse_noise([]), seed=seed))
+                yield source, spec, trk, gt, load(d)[1].ball      # ATD noise only: the ball is NOT removed in stoppages
     elif condition == "drift":
         for source in ("idsse", "metrica"):
             for d, seed in itertools.product(bundle.find(source, splits.games("val", sources=[source])), seeds):
@@ -182,12 +187,32 @@ def detect_all(spec, trk, models, ref):
         pr = dead.predict(ref, trk.players, trk.team_of_slot, spec.fps, spec.pitch, spec.halves)
         out["players_frame"] = np.nan_to_num(pr, nan=0.0) >= 0.5
         out["players"] = decoder.decode(pr, spec.halves, spec.fps, t0, w=0.2, prior=m0["meta"]["prior"])
-    for tag, m, tables in models:
+    for i, (tag, m, tables) in enumerate(models):
         p = model.predict(m, trk, spec)
         out[f"{tag}_frame"] = np.nan_to_num(p, nan=0.0) >= 0.5
         for w in WEIGHTS:
             out[f"{tag}_w{w:g}"] = decoder.decode(p, spec.halves, spec.fps, tables, w=w, prior=m["meta"]["prior"])
+        if i == len(models) - 1:                      # extras for the newest model only
+            for pr_x in (0.3, 0.2):                   # a less strict decision step
+                out[f"{tag}_prior{pr_x:g}"] = decoder.decode(p, spec.halves, spec.fps, tables, w=0.2, prior=pr_x)
+            if ref is not None:                       # + João's players-only P(dead), only where it stays high
+                for b in (0.5, 1.0):
+                    pc = combine(p, pr, b, spec.fps)
+                    out[f"{tag}+pl{b:g}"] = decoder.decode(pc, spec.halves, spec.fps, tables, w=0.2,
+                                                           prior=m["meta"]["prior"])
     return out
+
+
+def combine(p_ball: np.ndarray, p_players: np.ndarray, b: float, fps: float, smooth_s: float = 3.0) -> np.ndarray:
+    """P from logit(p_ball) + b * logit(p_players averaged over smooth_s): a players-only signal that stays
+    high for seconds can outweigh a moving ball. b is chosen on other games, never on our match."""
+    eps = 1e-4
+    lg = lambda x: np.log(np.clip(x, eps, 1 - eps)) - np.log(np.clip(1 - x, eps, 1 - eps))
+    pp = pd.Series(np.nan_to_num(p_players, nan=0.5)).rolling(max(1, int(round(smooth_s * fps))), center=True,
+                                                              min_periods=1).mean().to_numpy()
+    z = lg(np.nan_to_num(p_ball, nan=0.5)) + b * lg(pp)
+    out = 1.0 / (1.0 + np.exp(-np.clip(z, -30, 30)))
+    return np.where(np.isnan(p_ball), np.nan, out)
 
 
 COLS_A = ["alive_dead_f1", "stopF1", "dead_precision", "dead_recall", "start_f1", "end_f1", "start_err_s", "end_err_s"]
@@ -199,7 +224,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--model", nargs="*", default=[str(MODELS_DIR / "deadball_v1.joblib")],
                     help="one or more models, compared side by side (detector names get the model's tag)")
-    ap.add_argument("--conditions", nargs="*", default=["pff", "noisy"], choices=["pff", "noisy", "drift"])
+    ap.add_argument("--conditions", nargs="*", default=["pff", "noisy"], choices=["pff", "noisy", "drift", "kept"])
     ap.add_argument("--seeds", nargs="*", type=int, default=[0, 1])
     ap.add_argument("--stoppage-loss", type=float, default=0.8)
     ap.add_argument("--no-reference", action="store_true", help="skip João's players-only model")
@@ -210,7 +235,7 @@ def main(argv=None) -> int:
         m = model.load(path)
         models.append((m["meta"]["tag"], m,
                        (decoder.length_tables(m["lengths"]["alive"]), decoder.length_tables(m["lengths"]["dead"]))))
-    by_type_names = {"players", *(f"{t}_w0.2" for t, _, _ in models)}
+    by_type_names = {"players", *(f"{t}_w0.2" for t, _, _ in models), f"{models[-1][0]}+pl1"}
     ref = None
     if not args.no_reference:
         from .. import dead

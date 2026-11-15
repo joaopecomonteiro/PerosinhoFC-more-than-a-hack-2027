@@ -179,3 +179,70 @@ def test_drift_ball_loss_starts_before_the_stoppage_and_adds_live_gaps():
     none = model.drift_ball_loss(b, gt, FPS, np.random.default_rng(3), p_whole=1.0, lead_p=0.0, live_per_min=0.0,
                                  lag_p=0.0)
     assert not np.isnan(none[gt != "D", 0]).any()                  # all off: exactly the stoppage
+
+
+# ------------------------------------------------------------------------------------ v3 inputs
+
+def test_state_inputs_count_the_stopped_state():
+    n = FPS * 60
+    speed = np.full(n, 3.0)
+    speed[FPS * 20:FPS * 40] = 0.8                 # everyone slows at 20 s, speeds up again at 40 s
+    slow = np.where(speed < 1, 0.6, 0.1)
+    seen = np.ones(n, bool)
+    seen[FPS * 21:FPS * 40] = False                # the ball is lost during the stoppage
+    s = features.state(speed, slow, seen, FPS)
+    assert s["s_since_brake"][FPS * 30] == pytest.approx(10.0, abs=1.1)
+    assert s["s_until_go"][FPS * 30] == pytest.approx(10.0, abs=1.1)
+    assert s["s_speed_rel"][FPS * 30] < 0.5 < s["s_speed_rel"][FPS * 10]
+    assert s["s_slow_nob_s"][FPS * 35] == pytest.approx(14.0, abs=0.1) and s["s_slow_nob_s"][FPS * 45] == 0.0
+
+
+def test_setpiece_inputs_nan_without_a_ball():
+    n = FPS * 10
+    team = np.array([0] * 3 + [1] * 3)
+    players = np.zeros((n, 6, 2))
+    players[:, :, 1] = 30.0
+    players[:, :, 0] = [50.5, 55.0, 60.0, 59.8, 60.0, 61.0]   # home taker at the ball; away kept 9.8-11 m away
+    b = np.tile([50.0, 30.0], (n, 1))
+    b[FPS * 8:] = np.nan
+    f = features.setpiece(players, team, b, FPS)
+    i = FPS * 5
+    assert f["fk_still_s"][i] > 4.0 and f["fk_near"][i] == pytest.approx(0.5)
+    assert f["fk_n9_min"][i] == 0 and f["fk_n9_max"][i] == 2 and f["fk_ring"][i] == 3   # 10.0, 9.8, 10.0 m
+    assert np.isnan(f["fk_near"][FPS * 9]) and np.isnan(f["fk_n9_min"][FPS * 9])
+
+
+# ------------------------------------------------------------------------------------ v4 inputs
+
+def test_out_memory_holds_until_a_restart_kick():
+    n = FPS * 40
+    b = np.tile([30.0, 30.0], (n, 1)).astype(float)
+    b[FPS * 5:FPS * 8] = [30.0, -2.0]              # ball seen off the pitch (beyond the touchline)
+    b[FPS * 8:FPS * 20] = [30.0, 1.0]              # brought back on, held at the line
+    t = np.arange(n) / FPS
+    b[FPS * 20:, 0] = 30.0 + 12.0 * (t[FPS * 20:] - 20.0)    # the throw: 12 m/s from a still ball
+    players = np.tile([[30.0, 10.0]], (n, 1, 1))
+    m = features.memory(b, players, np.full(n, 0.6), FPS, PITCH)
+    assert m["m_out_open_s"][FPS * 15] == pytest.approx(7.0, abs=0.1)      # still open 7 s after the last off frame
+    assert m["m_kick_since"][FPS * 15] == 0.0
+    assert m["m_kick_since"][FPS * 25] == 1.0 and m["m_out_open_s"][FPS * 25] == 0.0
+
+
+def test_carried_while_everyone_is_slow():
+    n = FPS * 10
+    t = np.arange(n) / FPS
+    b = np.stack([20.0 + 2.0 * t, np.full(n, 30.0)], axis=1)              # ball at walking pace
+    players = np.stack([b + [0.5, 0.0], np.tile([60.0, 30.0], (n, 1))], axis=1)   # a player right next to it
+    slow = features.memory(b, players, np.full(n, 0.7), FPS, PITCH)
+    fast = features.memory(b, players, np.full(n, 0.1), FPS, PITCH)
+    assert slow["c_carry_slow"][FPS * 5] == 1.0 and fast["c_carry_slow"][FPS * 5] == 0.0
+
+
+def test_combine_lets_a_steady_players_signal_win():
+    n = FPS * 20
+    p_ball = np.full(n, 0.2)                     # the ball says "in play"
+    p_pl = np.full(n, 0.95)                      # the players say "stopped", steadily
+    assert evaluate.combine(p_ball, p_pl, 1.0, FPS)[FPS * 10] > 0.8
+    assert evaluate.combine(p_ball, p_pl, 0.0, FPS)[FPS * 10] == pytest.approx(0.2, abs=1e-3)
+    blip = np.full(n, 0.1); blip[FPS * 10:FPS * 10 + 5] = 0.99        # a 0.2 s players blip is averaged away
+    assert evaluate.combine(p_ball, blip, 1.0, FPS)[FPS * 10] < 0.2

@@ -77,7 +77,7 @@ def with_ball(trk, b):
     return atd.Tracking(trk.players, trk.player_speed, b.astype(np.float32), trk.team_of_slot)
 
 
-def training_games(seed: int = 0, drift: bool = False):
+def training_games(seed: int = 0, drift: bool = False, kept_share: float = 0.0):
     """(source, copy, spec, tracking, gt) for every training game copy. drift: drift_ball_loss (v2)."""
     from ..external import bundle, splits
     from ..external.evaluate import load, parse_noise
@@ -89,7 +89,9 @@ def training_games(seed: int = 0, drift: bool = False):
                     spec, trk, gt = load(d, noise_cfg=replace(parse_noise([]), seed=1000 + 100 * seed + i))
                 else:
                     spec, trk, gt = load(d, players_drop=True, seed=1000 + i)
-                if drift:                                # v2: gaps that do not line up with stoppages
+                if drift and rng.random() < kept_share:  # v4: the ball stays visible through the stoppages
+                    b = trk.ball.astype(np.float64)
+                elif drift:                              # v2: gaps that do not line up with stoppages
                     b = drift_ball_loss(trk.ball.astype(np.float64), gt, spec.fps, rng,
                                         p_whole=float(rng.uniform(0.3, 1.0)), lead_p=float(rng.uniform(0.2, 0.8)),
                                         live_per_min=float(rng.uniform(0.0, 1.0)))
@@ -113,13 +115,13 @@ def run_lengths(gt: np.ndarray, halves, fps: float) -> dict:
     return out
 
 
-def train(tag: str, iters: int = 400, seed: int = 0, drift: bool = False) -> dict:
+def train(tag: str, iters: int = 400, seed: int = 0, drift: bool = False, kept_share: float = 0.0) -> dict:
     from sklearn.ensemble import HistGradientBoostingClassifier
     import joblib
     t0 = time.time()
     Xs, ys, srcs, names = [], [], [], []
     lengths = {"dead": [], "alive": []}
-    for source, copy, spec, trk, gt in training_games(seed, drift):
+    for source, copy, spec, trk, gt in training_games(seed, drift, kept_share):
         X = features.build(trk.players, trk.team_of_slot, trk.ball, spec.fps, spec.pitch, spec.halves)
         k = max(1, int(round(spec.fps / SAMPLE_HZ)))
         idx = np.concatenate([np.arange(a, b + 1, k) for _, a, b in spec.halves])
@@ -143,7 +145,7 @@ def train(tag: str, iters: int = 400, seed: int = 0, drift: bool = False) -> dic
                                            l2_regularization=1.0, early_stopping=False, random_state=seed)
     model.fit(X.to_numpy(), y, sample_weight=w)
     meta = {"tag": tag, "train": names, "frames": int(len(X)), "inputs": int(X.shape[1]),
-            "prior": float(np.average(y, weights=w)), "iters": iters, "seed": seed, "drift": drift,
+            "prior": float(np.average(y, weights=w)), "iters": iters, "seed": seed, "drift": drift, "kept_share": kept_share,
             "n_stoppages": len(lengths["dead"]), "n_play": len(lengths["alive"])}
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     path = MODELS_DIR / f"deadball_{tag}.joblib"
@@ -180,8 +182,10 @@ def main(argv=None) -> int:
     t.add_argument("--iters", type=int, default=400)
     t.add_argument("--seed", type=int, default=0)
     t.add_argument("--drift", action="store_true", help="ball loss that does not line up with stoppages")
+    t.add_argument("--kept-share", type=float, default=0.0,
+                   help="with --drift: share of IDSSE / Metrica copies whose ball stays visible in stoppages")
     a = ap.parse_args(argv)
-    train(a.tag, a.iters, a.seed, a.drift)
+    train(a.tag, a.iters, a.seed, a.drift, a.kept_share)
     return 0
 
 
