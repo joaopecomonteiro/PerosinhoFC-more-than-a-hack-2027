@@ -1,81 +1,123 @@
 # Més que un Frame — More than a Hack 2027, Phase 1 (FC Barcelona × Metrica Sports)
 
-Our public repo: a fork of the official one, with our code (`mqf/`, `tests/`, `tasks.py`) at the
-top next to the official files. Task: label every frame of FC Barcelona vs Athletic Club
-(199,319 tactical-video frames) as H / A / D. Ranked on **spellF1**, tie-break macroF1. Floor:
-spellF1 **0.2433**. Deadline **17 Nov 2026**. Full context and plan: `docs/CONTEXT.md` — read it
-at the start of every session.
+**This branch (`deadball_italo`): dead-ball detection ONLY — "is the ball in play?" per frame.**
+No teams, no possession, no H / A logic here; the team owns those on `main` (code under `JS/`:
+`who.py`, `mqf/owner/`, the `--final` submission recipe). Always work and commit on
+`deadball_italo`; our code sits at the repo root next to the official files. Never merge into or
+reorganise `main` unless asked.
 
-Lead: Sigmar (MSc, deep learning for football multi-agent trajectory prediction — transformers,
-diffusion). Talk as a peer: skip ML basics, be direct, push back when an idea won't move spellF1.
+Competition task (context): label every frame of FC Barcelona vs Athletic Club (199,319 tactical-
+video frames) as H / A / D. Ranked on **spellF1**, tie-break macroF1. Floor spellF1 **0.2433**.
+Deadline **17 Nov 2026**. A better D (stoppage) call improves every possession boundary, which is
+why this branch exists. Background: `docs/CONTEXT.md`; log: `docs/EXPERIMENTS.md`.
+
+Talk as a peer: be direct, plain language, push back when an idea won't help or breaks a rule.
 
 ## Authority
-The official challenge repo, cloned read-only at a pinned commit into `vendor/mtah2027` by
-`python bootstrap.py`, wins over anything we write: its `*.md`, `games.py`,
-`evaluation/possession_metrics.py` (the metric spec), validator and scorer. Never edit `vendor/`;
-never copy its numbers into our code (import `games.py` via `mqf.config.official()`).
-`python bootstrap.py --check-updates` lists organiser commits newer than our pin — read them
-before bumping `OFFICIAL_COMMIT` (rules have been clarified mid-competition).
+The official repo, pinned into `vendor/mtah2027` by `python bootstrap.py`, wins over anything we
+write: its `*.md` (**`RULES.md`**, `CHALLENGE.md`, `EVALUATION.md`, `SUBMISSION.md`, `FAQ.md`,
+`DATA.md`), `games.py`, `evaluation/possession_metrics.py` (the metric spec), validator, scorer.
+Never edit `vendor/`; never copy its numbers; import via `mqf.config.official()`. The T&Cs signed
+at registration also bind us (not in the repo). `python bootstrap.py --check-updates` lists
+organiser commits newer than our pin.
 
 ## Hard rules (disqualification-level)
-1. **Never read, print, plot, summarise or receive the real match data or any extract** — the
-   T&Cs forbid giving it to any cloud LLM, including you. Off-limits: `data/`, `cache/`,
-   `results/`, `reports/`, `*.mp4`, `*_atd.*`, `*_homography.csv`, `*_smart_tagging.xml`.
-   Also `evaluation/results/` (baselines computed from the ATD) and `*.npz`.
-   `.claude/settings.json` denies them; respect the intent too (no `head`, `np.load`, notebook
-   outputs via Bash). Work from the schema, `mqf/synthetic.py` and other games. The team runs
-   real-data commands and shares only aggregates (spellF1, macroF1, poss, dur, transF1,
-   alive_dead_f1) or tracebacks with values removed. If raw rows/frames/images get pasted, say so
-   and don't use them. That includes screenshots or clips of `python -m mqf.viewer` on BAR-ATH (test the
-   viewer on `--synthetic`). Synthetic data, IDSSE and `harness_results/` are fine to read.
-2. **Nothing hand-made about this game**: no labels, corrections, or rules/constants tied to
-   specific frames (e.g. don't hard-code the 2nd-half kickoff frame — detect stoppages). The
-   published half blocks are only the graded window. Thresholds come from football knowledge,
-   synthetic data or other games.
-3. **Public 5-minute GT = correctness only** — never training, tuning or choosing between versions.
+1. **Never read, print, plot, summarise or receive the real match data or any extract** — the T&Cs
+   forbid giving it to any cloud LLM, including you. Off-limits: `data/`, `cache/`, `results/`,
+   `reports/`, `evaluation/results/`, `*.mp4`, `*_atd.*`, `*_homography.csv`,
+   `*_smart_tagging.xml`, `*.npz`. `.claude/settings.json` denies them; respect the intent too.
+   An extract includes: rows or frame-level values from `mqf.deadball.inspect`, screenshots or
+   clips of the viewer on BAR-ATH, timestamps with positions / speeds / probabilities, and **text
+   another AI wrote from such data**. If any of it gets pasted, say so and don't use its values.
+   Fine to receive: aggregates printed by our tools (counts, shares, percentiles over the match,
+   scores on the public window) and a pattern described in words ("ball missing, players slow,
+   P(dead) falls"). Other games (IDSSE, Metrica, PFF, SkillCorner), synthetic data and
+   `harness_results/` are fine to read.
+2. **Nothing hand-made about this game**: no labels, corrections, or rules / constants tied to
+   specific frames — **a list of moments ("offside at 23:10") used to fix or test a model is hand
+   annotation**. Watching the video to understand is fine; turning it into labels or frame-tied
+   rules is not. Thresholds come from the Laws of the Game, football knowledge or other games.
+3. **Public 5-minute GT = correctness check only** — never training, tuning or choosing between
+   versions. Choices are made on other games. Where our model "looks better than the GT", the GT
+   is still right (CHALLENGE.md).
 4. No human-produced data about this game (event feeds, corrected tracking). Other games are fine
-   and must be documented in TECHNICAL.md (source, labeller, amount).
-5. Public repo: nothing derived from the match data is ever committed (check `.gitignore`).
-6. The submission must be regenerated byte-identically by one command (`make reproduce`).
+   and must be documented in `docs/TECHNICAL.md` (source, labeller, amount).
+5. Public repo: nothing derived from the match data is ever committed — per-frame outputs, feature
+   percentiles of our match (`mqf.deadball.shift` writes to `reports/`), anything in `results/`.
+   Aggregates in `docs/EXPERIMENTS.md` are the agreed exception.
+6. The final submission must be regenerated byte-identically by one command.
+
+## Git
+- Branch `deadball_italo`; commit only when asked; **never add a Co-Authored-By / AI attribution
+  line** to commits or PRs. Before committing, check nothing under `data/`, `results/`,
+  `reports/`, `cache/` or match-derived files is staged.
 
 ## Data contract (official DATA.md — don't re-derive)
-- Submission `frame,label`, 199,319 rows, 0…199318 in order, H/A/D/X, no blanks; H = Barcelona.
-- Graded 11,185–90,651 and 110,808–190,197; the 2nd half opens with a long stoppage before kickoff.
-  Never write X on graded frames (spellF1 forward-fills it, macroF1 charges it).
+- Graded frames 11,185–90,651 and 110,808–190,197; the 2nd half opens with a long stoppage before
+  kickoff (detect it, never hard-code it). The viewer's clock ("1st half 05:17") counts from each
+  half's first graded frame.
 - ATD raw `<frame_id>:<x,y,s>;…:<bx,by,bs>`, normalised 0–1, NaN missing, `video_frame = frame_id-1`,
-  pitch 105.3 × 68.0 m, 46 anonymous tracklet slots, team per slot from meta XML (first Team =
-  home), ~20.5 tracked in play, ball missing on 41% of graded frames.
-- Smart Tagging: seconds × 25 = frame; Team ∈ {Barcelona, Atletic Club, N/A}; windows open
-  ~3.5 s before restarts; phases ≠ possessions.
-- GT semantics: corrected-tracking dead flag + owning team → emulate tracking-based ownership.
+  pitch 105.3 × 68.0 m, 46 anonymous tracklet slots, team per slot from the kit (keepers often
+  wrong), ~20.5 tracked in play, ball missing on 41% of graded frames.
+- GT semantics: `D` = the corrected tracking's dead flag, derived mechanically — its own convention
+  for when a stoppage starts and play restarts.
 
-## Metric facts that drive design
-Spells matched one-to-one, same team, greedy by IoU 0.3–0.7, inside each half. Every possession
-counts once regardless of length → short spells matter; splitting (spurious D/blips) and merging
-(missed short stoppage or short opponent spell) both cost. 1-frame lag free, 1 s kills short
-spells. Noise: spellF1 ±0.04 on one match, macroF1 ±0.01; harness noise seeds alone move spellF1
-by ~±0.06, so average over matches × seeds.
+## The dead-ball package (`mqf/deadball/`)
+```
+python -m mqf.deadball.model train --tag v3 [--drift]   # P(dead) on other games -> models/deadball_v3.joblib
+python -m mqf.deadball.evaluate --model models/deadball_v2.joblib models/deadball_v3.joblib \
+       --conditions pff noisy drift --tag v2_vs_v3        # scores on other games, per stoppage type
+python -m mqf.deadball.run --tag v3                     # our match -> results/deadball/v3.csv (D / X), aggregates
+python -m mqf.viewer --deadball                         # gray where the ball is dead, every lane incl. GT
+python -m mqf.deadball.shift --tag v3                   # our inputs vs other games (aggregates; to reports/)
+python -m mqf.deadball.inspect --half 1 --from 1:00 --to 1:16 --tag v3   # TEAM'S OWN TERMINAL ONLY
+```
+- `features.py` João's player features (`mqf.dead`) + ball (gap length, time since / until seen,
+  gap starts / ends at a restart spot, off pitch, distance to line, speed, still) + slow-down /
+  speed-up edges. `model.py` HistGradientBoosting, trained on IDSSE 5 + Metrica 2 (ATD noise and
+  dropout copies, randomised ball loss in stoppages; `--drift`: gaps that don't line up with
+  stoppages) + PFF 56 as is, sources weighted equally. `decoder.py` two-state semi-Markov decoder
+  at 5 Hz with real stoppage / play lengths (w 0.2). `evaluate.py` official building blocks:
+  alive_dead_f1, **stopF1** (whole stoppages by IoU, like spellF1), start / restart within 1 s,
+  found by length and **by stoppage type** (typed by where play restarts; "free kick" = fouls +
+  offsides).
+- Conditions: **pff** = PFF val as is (honest: we didn't make its ball loss); **noisy** / **drift**
+  = IDSSE + Metrica val with ATD noise and our ball-loss mechanisms (optimistic — training uses the
+  same mechanisms). Decide on pff first; a change must not lose on any condition.
+- Our match: only aggregates (`run`, `shift`, the public-window summary commands below) and the
+  team's eyes in the viewer / `inspect`.
 
-## Data priority (Sigmar, 10 Nov)
-- Work on **our match's tactical and broadcast recordings** first. For an AI assistant that means:
-  build against the schema and the synthetic match, the team runs it on the real files and shares
-  aggregates (rule 1 is unchanged).
-- Other games (IDSSE, Metrica, SkillCorner, PFF World Cup 2022 bundles in `external/bundles/`) only when a task needs a
-  lot of data. They stay as is: no added noise, no resampling. `source` is kept as a column; which
-  sources a task uses is decided per task. SkillCorner (10 fps) is not used for training.
-- Split by game, per source, fixed in `splits.json` (`python -m mqf.external.splits`).
-- Ball visibility / imputation is a later, separate model.
+## What we know (details: EXPERIMENTS #34–35)
+- pff, alive_dead_f1 · stopF1: João's players-only `dead_v1` 0.927 · 0.69 → `deadball_v1/v2`
+  0.947 · 0.79. drift: v1 0.76, **v2 0.84**. The decoder matters (same model frame by frame 0.40).
+- Weakest stoppage type: **free kicks** (fouls + offsides) — restart in open play, ball often
+  tracked, players slow down gradually (only 30–50% under 1 m/s in a stoppage's first 8 s).
+  On PFF, free kicks with the ball **visible** are missed most (P(dead) ~0.3 throughout).
+- Our match (aggregates): ~95 stoppages, dead ~39% of graded frames — plausible overall. Public
+  window: 4 GT stoppages, v1 and v2 both find 1, no false alarms (44 s missed). Team's words: the
+  ball is missing through the stoppage, players slow and stay slow, P(dead) rises then fades — on
+  other games P(dead) in missed stoppages hovers at 0.5–0.7 instead, so the fading is specific to
+  our tracker.
+- Our tracker vs other games (`shift`): ball tracked more often, ball still more often, much
+  smoother player speeds, people tracked beside the pitch. The tracker loses the ball for long
+  stretches (150 gaps, median 10.7 s) that often begin in play.
+- Next (v3): "stopped state" inputs (time since collective braking, speed vs the previous 10–20 s,
+  time slow while the ball is missing) and visible-ball free-kick cues (ball still anywhere, nobody
+  of the other side within 9.15 m, defenders backing off / a wall).
 
 ## How we work
-- Pipeline `mqf/atd.py → features.py (+ smart_tagging.py) → decode.py → submission.py`, CLI
-  `python -m mqf.make_submission`. Improve evidence or decoder; keep interfaces stable.
-- Before a change: name the failure mode (flicker, missed stoppage, split, merge, late boundary,
-  loose-ball handover, long ball gap, tracker duplicates) and the expected spellF1/macroF1 effect.
-- Make it appear in `synthetic.py` if needed → `make test` (must pass) → **decide on the harness**
-  (`python -m mqf.harness.run --source idsse`, official metric, length buckets). Never
+- Before a change: name the failure mode (missed stoppage, false stoppage, late start, early /
+  late restart, a stoppage type) and the expected effect on stopF1 / alive_dead_f1.
+- Measure on other games with `mqf.deadball.evaluate`; add a test in `tests/test_deadball.py`
+  (decoder changes: keep the brute-force check); `python -m pytest -q` must pass. Never
   reimplement the metric.
-- Noise-model parameters not published by the organisers are assumptions: check that a decision
-  survives varying them, don't calibrate them on the real match.
-- Log every run in `docs/EXPERIMENTS.md` (aggregates only); keep `TECHNICAL.md` current.
-- numpy/pandas, vectorised; Python 3.12–3.13; pins in `requirements.txt`; deterministic.
-- Unsure if something is allowed → draft a GitHub issue for the official repo instead of guessing.
+- Assumptions about how a tracker loses the ball are randomised in training and varied in
+  evaluation (`--stoppage-loss`), never calibrated on our match.
+- Log every run in `docs/EXPERIMENTS.md` (aggregates only); keep `docs/TECHNICAL.md` current.
+- The team checks our match locally: `inspect` in their own terminal (not with `!`), then a pattern
+  in words. Public-window summaries via `!` commands that print totals only.
+- Environments: `.venv` (uv, Python 3.13, pinned `requirements.txt`; scikit-learn 1.9.1 is needed
+  for the pickled models), `.venv-harness` for IDSSE parsing (floodlight, pandas < 3). Machine:
+  Ryzen 5 7600X (6 cores), 31 GB RAM, RTX 4060 Ti 8 GB — the dead-ball work is CPU-only.
+- numpy / pandas, vectorised, deterministic. Unsure if something is allowed → ask, or draft a
+  GitHub issue for the official repo.
