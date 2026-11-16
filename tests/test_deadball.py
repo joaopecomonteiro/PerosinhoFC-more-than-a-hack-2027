@@ -270,3 +270,102 @@ def test_carried_ball_is_visible_follows_a_player_and_ends_at_the_restart():
     assert np.allclose(out[:FPS * 20], b[:FPS * 20]) and np.allclose(out[FPS * 40:], b[FPS * 40:])
     keep = model.carried_ball(b, players, gt, FPS, np.random.default_rng(0), p_carry=0.0)
     assert np.allclose(keep, b)
+
+
+# ------------------------------------------------------------------------------------ v6 inputs
+
+def test_bridge_fills_short_dips_only():
+    f = np.array([1, 1, 0, 1, 1, 0, 0, 0, 1], dtype=bool)
+    assert features._bridge(f, 1).tolist() == [1, 1, 1, 1, 1, 0, 0, 0, 1]
+
+
+def _v6_scene(n_s=80):
+    n = FPS * n_s
+    t = np.arange(n) / FPS
+    speed = np.full(n, 3.0); speed[FPS * 20:FPS * 50] = 0.8          # whistle at 20 s, restart at 50 s
+    slow = np.where(speed < 1, 0.7, 0.1)
+    slow[FPS * 35:FPS * 35 + 5] = 0.0                                  # a one-frame-ish dip in the stoppage
+    b = np.stack([10.0 + 2.0 * t, np.full(n, 30.0)], axis=1)           # ball rolls on, straight, at 2 m/s ...
+    b[FPS * 30:FPS * 32] = np.stack([70.0 + 0.0 * t[:FPS * 2], np.full(FPS * 2, 69.0)], axis=1)   # ... off the pitch
+    b[FPS * 32:FPS * 48] = [70.0, 66.0]                                # brought back, held at the line
+    b[FPS * 40:FPS * 40 + 10, 0] = 70.0 + np.linspace(0, 4, 10)        # a little kick: the ball being returned
+    b[FPS * 50:, 0] = 70.0 - 12.0 * (t[FPS * 50:] - 50.0)              # the throw-in: 12 m/s from still
+    b[FPS * 50:, 1] = 66.0
+    players = np.tile([[30.0, 30.0]], (n, 1, 1))
+    return speed, slow, b, players
+
+
+def test_v6_unplayed_returns_restart_and_smoothing():
+    speed, slow, b, players = _v6_scene()
+    f = features.stopped_v6(b, players, speed, slow, FPS, PITCH)
+    assert f["u_unplayed_s"][FPS * 25] > 3.0                           # rolled on untouched after the brake
+    assert f["m2_open_s"][FPS * 45] > 10.0                             # the return kick did NOT close it
+    assert f["m2_returns"][FPS * 45] >= 1
+    assert f["m2_open_s"][FPS * 60] == 0.0                             # the real restart (team speeds up) did
+    assert f["s2_team_stopped_s"][FPS * 45] > 20.0                     # the short dip did not reset it
+
+
+def test_v6_memory_times_out_when_play_clearly_resumed():
+    n = FPS * 60
+    speed = np.full(n, 3.0)
+    slow = np.full(n, 0.05)
+    b = np.tile([50.0, 30.0], (n, 1)).astype(float)
+    b[FPS * 5] = [50.0, -2.0]                                          # one frame off the pitch, then play on
+    players = np.tile([[30.0, 30.0]], (n, 1, 1))
+    f = features.stopped_v6(b, players, speed, slow, FPS, PITCH)
+    assert f["m2_open_s"][FPS * 15] > 0.0 and f["m2_open_s"][FPS * 40] == 0.0
+
+
+# ------------------------------------------------------------------------------------ v7 "CR7" inputs
+
+def test_v7_memory_opens_only_on_a_real_out():
+    n = FPS * 30
+    speed, slow = np.full(n, 1.0), np.full(n, 0.6)
+    t = np.arange(n) / FPS
+    mid = np.stack([30.0 + 3.0 * t, np.full(n, 34.0)], axis=1)
+    mid[FPS * 10:FPS * 20] = np.nan                                    # vanishes in midfield: NOT an out
+    assert (features.stopped_v7(mid, speed, slow, FPS, PITCH)["m3_open_s"] == 0).all()
+    line = np.stack([np.full(n, 50.0), 48.0 + 2.0 * t], axis=1)        # rolls toward the far touchline (y = 68)
+    line[FPS * 10:FPS * 20] = np.nan                                   # vanishes at y = 68, moving outward
+    f = features.stopped_v7(line, speed, slow, FPS, PITCH)
+    assert f["m3_open_s"][FPS * 15] > 4.0
+
+
+def test_v7_restart_closes_memory_and_switches_team_stopped_off():
+    speed, slow, b, players = _v6_scene()
+    f = features.stopped_v7(b, speed, slow, FPS, PITCH)
+    assert f["m3_open_s"][FPS * 45] > 10.0                             # open through the stoppage
+    assert f["m3_returns"][FPS * 45] >= 1                              # the return kick, team stopped
+    assert f["s3_team_stopped_s"][FPS * 45] > 20.0
+    i = FPS * 50 + 15                                                  # just after the throw-in
+    assert f["m3_open_s"][i] == 0.0 and f["s3_team_stopped_s"][i] == 0.0
+    assert f["r_since_restart_s"][i] < 1.0 and f["r_until_restart_s"][FPS * 48] < 3.0
+
+
+def test_v7_memory_closes_once_play_clearly_looks_alive():
+    n = FPS * 40
+    speed, slow = np.full(n, 3.0), np.full(n, 0.05)                    # play is clearly alive throughout
+    b = np.tile([50.0, 30.0], (n, 1)).astype(float)
+    b[FPS * 5] = [50.0, -2.0]                                          # one frame seen off the pitch
+    f = features.stopped_v7(b, speed, slow, FPS, PITCH)
+    assert f["m3_open_s"][FPS * 6] > 0.0 and f["m3_open_s"][FPS * 14] > 0.0     # the 10 s timeout first
+    assert f["m3_open_s"][FPS * 20] == 0.0                                          # then closed: play is alive
+
+
+# ------------------------------------------------------------------------------------ v8 keeper inputs
+
+def test_keeper_hold_after_a_save_including_while_the_ball_is_lost_in_his_hands():
+    n = FPS * 20
+    t = np.arange(n) / FPS
+    players = np.zeros((n, 3, 2))
+    players[:, 0] = [2.0, 34.0]                                        # the keeper, deepest, on his line
+    players[:, 1] = [30.0, 30.0]; players[:, 2] = [40.0, 40.0]
+    b = np.tile([2.5, 34.0], (n, 1)).astype(float)                     # in his hands ...
+    b[:FPS * 5, 0] = 2.5 + 15.0 * (5.0 - t[:FPS * 5])                  # ... after a 15 m/s shot at goal
+    b[FPS * 10:FPS * 14] = np.nan                                      # the tracker loses it in his hands
+    k = features.keeper_v8(b, players, FPS, PITCH)
+    assert k["k_hold"][FPS * 7] == 1.0 and k["k_save_hold"][FPS * 7] == 1.0
+    assert k["k_hold"][FPS * 12] == 1.0                                # carried through the gap
+    assert k["k_since_shot_s"][FPS * 7] < 5.0
+    players[:, 1] = [0.5, 30.0]                                        # someone deeper than him: not the keeper rule
+    assert features.keeper_v8(b, players, FPS, PITCH)["k_hold"][FPS * 7] == 0.0

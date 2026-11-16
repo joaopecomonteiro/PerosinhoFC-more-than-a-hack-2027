@@ -35,7 +35,7 @@ def main(argv=None) -> int:
 
     spec = competition_game()
     trk = atd.load(spec)
-    Xo = features.build(trk.players, trk.team_of_slot, trk.ball, spec.fps, spec.pitch, spec.halves)
+    Xo = model.add_players_columns(features.build(trk.players, trk.team_of_slot, trk.ball, spec.fps, spec.pitch, spec.halves), m, spec)
     po = model.predict(m, trk, spec)
     k = max(1, int(round(spec.fps / 5)))
     ours = _graded_rows(Xo, spec.halves, k)
@@ -44,7 +44,7 @@ def main(argv=None) -> int:
     others, p_oth = [], []
     for cond in ("pff", "drift"):
         for _, sp, tk, gt, _ in evaluate.games(cond, [0], 0.8):
-            X = features.build(tk.players, tk.team_of_slot, tk.ball, sp.fps, sp.pitch, sp.halves)
+            X = model.add_players_columns(features.build(tk.players, tk.team_of_slot, tk.ball, sp.fps, sp.pitch, sp.halves), m, sp)
             kk = max(1, int(round(sp.fps / 5)))
             others.append(_graded_rows(X, sp.halves, kk))
             p = model.predict(m, tk, sp)

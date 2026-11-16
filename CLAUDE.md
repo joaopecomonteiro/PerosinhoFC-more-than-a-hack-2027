@@ -64,46 +64,61 @@ organiser commits newer than our pin.
 
 ## The dead-ball package (`mqf/deadball/`)
 ```
-python -m mqf.deadball.model train --tag v3 [--drift]   # P(dead) on other games -> models/deadball_v3.joblib
-python -m mqf.deadball.evaluate --model models/deadball_v2.joblib models/deadball_v3.joblib \
-       --conditions pff noisy drift --tag v2_vs_v3        # scores on other games, per stoppage type
-python -m mqf.deadball.run --tag v3                     # our match -> results/deadball/v3.csv (D / X), aggregates
-python -m mqf.viewer --deadball                         # gray where the ball is dead, every lane incl. GT
-python -m mqf.deadball.shift --tag v3                   # our inputs vs other games (aggregates; to reports/)
-python -m mqf.deadball.inspect --half 1 --from 1:00 --to 1:16 --tag v3   # TEAM'S OWN TERMINAL ONLY
+python -m mqf.deadball.model train --tag v8 --drift --kept-share 0.2 --carried-share 0.4 --stack-players
+                                                        # P(dead) on other games -> models/deadball_v8.joblib
+python -m mqf.deadball.evaluate --model models/deadball_v6.joblib models/deadball_v7.joblib \
+       --conditions pff drift kept carried noisy --no-reference --tag v6_vs_v7   # other games, per type
+python -m mqf.deadball.run --tag v7 --out-tag CR7       # our match -> results/deadball/CR7.csv (D / X), aggregates
+python -m mqf.viewer --deadball                         # gray where the ball is dead; lanes = results/deadball/*.csv
+python -m mqf.deadball.shift --tag v7                   # our inputs vs other games (aggregates; to reports/)
+python -m mqf.deadball.inspect --csv --all-inputs --tag v7   # TEAM'S OWN TERMINAL: public-window stoppages
+                                                        # (+5 s context) -> reports/deadball/*.csv, never into an AI
 ```
-- `features.py` João's player features (`mqf.dead`) + ball (gap length, time since / until seen,
-  gap starts / ends at a restart spot, off pitch, distance to line, speed, still) + slow-down /
-  speed-up edges. `model.py` HistGradientBoosting, trained on IDSSE 5 + Metrica 2 (ATD noise and
-  dropout copies, randomised ball loss in stoppages; `--drift`: gaps that don't line up with
-  stoppages) + PFF 56 as is, sources weighted equally. `decoder.py` two-state semi-Markov decoder
-  at 5 Hz with real stoppage / play lengths (w 0.2). `evaluate.py` official building blocks:
-  alive_dead_f1, **stopF1** (whole stoppages by IoU, like spellF1), start / restart within 1 s,
-  found by length and **by stoppage type** (typed by where play restarts; "free kick" = fouls +
-  offsides).
-- Conditions: **pff** = PFF val as is (honest: we didn't make its ball loss); **noisy** / **drift**
-  = IDSSE + Metrica val with ATD noise and our ball-loss mechanisms (optimistic — training uses the
-  same mechanisms). Decide on pff first; a change must not lose on any condition.
-- Our match: only aggregates (`run`, `shift`, the public-window summary commands below) and the
-  team's eyes in the viewer / `inspect`.
+- `features.py`, all built by `build()` (older models read only their own columns): João's player
+  features (`mqf.dead`) + ball (gaps, restart spots, off pitch, still, speed) + edges (v2) + stopped
+  state and visible-ball free kick (v3) + "went out" memory and carried-while-slow (v4) +
+  `stopped_v6` (ball unplayed since the brake, smoothed team / no-ball stopped) + `stopped_v7` (real-out
+  memory closed only by a restart = kick / reappearance WITH players speeding up, returns while the
+  team is stopped, team_stopped off at the restart, time since / until restart) + `keeper_v8` (keeper
+  holding in his box by geometry, carried through a gap in his hands, save-and-catch).
+- `model.py` HistGradientBoosting on IDSSE 5 + Metrica 2 (ATD-noise and dropout copies) + PFF 56,
+  sources weighted equally. Ball conditions are RANDOMISED per copy: `--drift` (gaps not aligned with
+  stoppages), `--kept-share` (ball visible through stoppages), `--carried-share` (`carried_ball`: the
+  stoppage ball rolls on, travels with a player, is passed back, is put down at the restart).
+  `--stack-players`: a players-only P(dead) as input (out-of-fold by game in training; `pl_p` + 3 s /
+  10 s / min / back / forward views). `add_players_columns` adds those for prediction / inspect.
+- `decoder.py` two-state semi-Markov at 5 Hz with real stoppage / play lengths, w 0.2, prior = the
+  training prior (looser priors rejected; stricter 0.5 / 0.55 in the eval, untested yet).
+- `evaluate.py` official building blocks: alive_dead_f1, **stopF1** (whole stoppages by IoU, like
+  spellF1), dead precision / recall, start / restart within 1 s, found by length and **by stoppage
+  type** (typed by where play restarts; "free kick" = fouls + offsides), **keeper_fp** (share of
+  in-play keeper-holding time called dead). Conditions: **pff** = PFF val as is (honest); **kept** =
+  ATD noise, ball never removed; **carried** = ball visible and moving in stoppages; **noisy** /
+  **drift** = ball removed in stoppages, aligned / not. kept / carried / noisy / drift are optimistic
+  (training uses the same mechanisms). Decide on pff first; a change must not lose anywhere.
+- Our match: only aggregates (`run`, `shift`, the public-window summary command) and the team's
+  eyes (viewer `--deadball`, `inspect --csv` read locally, reported back as patterns in words).
 
-## What we know (details: EXPERIMENTS #34–35)
-- pff, alive_dead_f1 · stopF1: João's players-only `dead_v1` 0.927 · 0.69 → `deadball_v1/v2`
-  0.947 · 0.79. drift: v1 0.76, **v2 0.84**. The decoder matters (same model frame by frame 0.40).
-- Weakest stoppage type: **free kicks** (fouls + offsides) — restart in open play, ball often
-  tracked, players slow down gradually (only 30–50% under 1 m/s in a stoppage's first 8 s).
-  On PFF, free kicks with the ball **visible** are missed most (P(dead) ~0.3 throughout).
-- Our match (aggregates): ~95 stoppages, dead ~39% of graded frames — plausible overall. Public
-  window: 4 GT stoppages, v1 and v2 both find 1, no false alarms (44 s missed). Team's words: the
-  ball is missing through the stoppage, players slow and stay slow, P(dead) rises then fades — on
-  other games P(dead) in missed stoppages hovers at 0.5–0.7 instead, so the fading is specific to
-  our tracker.
-- Our tracker vs other games (`shift`): ball tracked more often, ball still more often, much
-  smoother player speeds, people tracked beside the pitch. The tracker loses the ball for long
-  stretches (150 gaps, median 10.7 s) that often begin in play.
-- Next (v3): "stopped state" inputs (time since collective braking, speed vs the previous 10–20 s,
-  time slow while the ball is missing) and visible-ball free-kick cues (ball still anywhere, nobody
-  of the other side within 9.15 m, defenders backing off / a wall).
+## Models and what we know (details: EXPERIMENTS #34–41)
+| model | what changed | stopF1 pff | public 5 min (4 GT stoppages, 58.8 s dead) |
+|---|---|---|---|
+| João `dead_v1` (in the team's `--final`) | players only | 0.69 | — |
+| v1 / v2 | + ball; v2 gaps not aligned | 0.79 | 1 found, 44 s missed |
+| v3 / v4 | stopped state, free kick; out memory, kept ball | 0.79 | 1 found, 44 s missed |
+| v5 | carried-ball simulation | 0.796 | 37.2 s dead, 23.0 missed, 1.4 false |
+| **v6** | ball unplayed after brake, smoothed stopped, players-only stacking | **0.804** | 42.0 s dead, 18.4 missed, 1.6 false; 3 real stoppages, the last **split in two** (keeper walks with the ball) |
+| **v7 "CR7"** | real-out memory, restart-aware team_stopped, restart timing | **0.805** | 45.0 s dead, 15.4 missed, 1.6 false; 3 real stoppages, last one whole; **false stoppage on a keeper save-and-catch** |
+| v8 | CR7 + keeper holding (`keeper_v8`) | not trained yet | — |
+- Freeze candidates: **v6** and **CR7** (tie on other games; the team currently leans to v6 — a false
+  stoppage is as bad as a miss: it splits a real possession). No model catches the first public-window
+  stoppage. v8 addresses the keeper false alarm: train it, compare with v6 and CR7 incl. `keeper_fp`.
+- Why our match was hard: early in each half our tracker keeps the ball visible and moving through
+  stoppages (fetched, carried, passed back, rolling on after the whistle); later it loses the ball for
+  long stretches (150 gaps, median 10.7 s). On other games the models had no early-half weakness.
+- Rules of football we rely on: a keeper holding the ball is IN PLAY (Law 12) — every training source
+  labels it alive; free kicks restart anywhere (Law 13, 9.15 m); stoppages end at a restart, not when
+  speeds drift back up.
+- Weakest type everywhere: free kicks (fouls + offsides), ~74% found on PFF.
 
 ## How we work
 - Before a change: name the failure mode (missed stoppage, false stoppage, late start, early /
@@ -114,8 +129,8 @@ python -m mqf.deadball.inspect --half 1 --from 1:00 --to 1:16 --tag v3   # TEAM'
 - Assumptions about how a tracker loses the ball are randomised in training and varied in
   evaluation (`--stoppage-loss`), never calibrated on our match.
 - Log every run in `docs/EXPERIMENTS.md` (aggregates only); keep `docs/TECHNICAL.md` current.
-- The team checks our match locally: `inspect` in their own terminal (not with `!`), then a pattern
-  in words. Public-window summaries via `!` commands that print totals only.
+- The team checks our match locally: `inspect --csv` / `inspect` in their own terminal (not with `!`),
+  then a pattern in words — never the CSV or rows to any AI tool. Public-window summaries via `!` commands that print totals only.
 - Environments: `.venv` (uv, Python 3.13, pinned `requirements.txt`; scikit-learn 1.9.1 is needed
   for the pickled models), `.venv-harness` for IDSSE parsing (floodlight, pandas < 3). Machine:
   Ryzen 5 7600X (6 cores), 31 GB RAM, RTX 4060 Ti 8 GB — the dead-ball work is CPU-only.

@@ -201,7 +201,7 @@ def detect_all(spec, trk, models, ref):
         for w in WEIGHTS:
             out[f"{tag}_w{w:g}"] = decoder.decode(p, spec.halves, spec.fps, tables, w=w, prior=m["meta"]["prior"])
         if i == len(models) - 1:                      # extras for the newest model only
-            for pr_x in (0.3, 0.2):                   # a less strict decision step
+            for pr_x in (0.5, 0.55):                  # a STRICTER decision step: fewer false stoppages
                 out[f"{tag}_prior{pr_x:g}"] = decoder.decode(p, spec.halves, spec.fps, tables, w=0.2, prior=pr_x)
             if ref is not None:                       # + João's players-only P(dead), only where it stays high
                 for b in (0.5, 1.0):
@@ -223,8 +223,9 @@ def combine(p_ball: np.ndarray, p_players: np.ndarray, b: float, fps: float, smo
     return np.where(np.isnan(p_ball), np.nan, out)
 
 
-COLS_A = ["alive_dead_f1", "stopF1", "dead_precision", "dead_recall", "start_f1", "end_f1", "start_err_s", "end_err_s"]
-COLS_B = ["stops_true", "stops_pred", "stop_s_true", "stop_s_pred", "found_0-5s", "found_5-15s", "found_15-40s",
+COLS_A = ["alive_dead_f1", "stopF1", "dead_precision", "dead_recall", "start_f1", "end_f1", "start_err_s", "end_err_s",
+          "keeper_fp"]
+COLS_B = ["keeper_hold_s", "stops_true", "stops_pred", "stop_s_true", "stop_s_pred", "found_0-5s", "found_5-15s", "found_15-40s",
           "found_40-infs"]
 
 
@@ -252,9 +253,14 @@ def main(argv=None) -> int:
     for cond in args.conditions:
         for source, spec, trk, gt, clean in games(cond, args.seeds, args.stoppage_loss):
             stops = stoppage_types(gt, clean, spec.pitch, spec.fps)
+            from .features import keeper_v8                  # keeper holding while play is alive (Law 12)
+            alive = (gt == "H") | (gt == "A")
+            kh = (keeper_v8(trk.ball, trk.players, spec.fps, spec.pitch)["k_hold"].to_numpy() > 0) & alive
             for name, mask in detect_all(spec, trk, models, ref).items():
                 rows.append({"condition": cond, "source": source, "game": spec.name, "detector": name,
-                             **score(gt, mask, spec.fps)})
+                             **score(gt, mask, spec.fps),
+                             "keeper_hold_s": float(kh.sum() / spec.fps),
+                             "keeper_fp": float(mask[kh].mean()) if kh.any() else np.nan})
                 if name in by_type_names:
                     trows += [{"condition": cond, "detector": name, "game": spec.name, **r}
                               for r in by_type(stops, mask, spec.fps)]

@@ -103,6 +103,7 @@ def main(argv=None) -> int:
     tables = decoder.length_tables(m["lengths"]["alive"]), decoder.length_tables(m["lengths"]["dead"])
     dead = decoder.decode(p, spec.halves, fps, tables, w=a.w, prior=m["meta"]["prior"])
     X = features.build(trk.players, trk.team_of_slot, trk.ball, fps, spec.pitch, spec.halves)
+    model.add_players_columns(X, m, spec)                 # v6+: the players-only inputs too
 
     still_run = features._run_s(X["b_still"].to_numpy() > 0, fps)
     bsp = X["b_speed"].to_numpy()

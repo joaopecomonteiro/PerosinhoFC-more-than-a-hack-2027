@@ -203,6 +203,247 @@ def memory(b: np.ndarray, players: np.ndarray, share_slow: np.ndarray, fps: floa
     })
 
 
+def _bridge(flag: np.ndarray, max_gap: int) -> np.ndarray:
+    """flag with False dips of at most max_gap frames filled in (a run survives a brief dip)."""
+    out = flag.copy()
+    d = np.diff(np.r_[1, flag.astype(np.int8), 1])
+    for s, e in zip(np.flatnonzero(d == -1), np.flatnonzero(d == 1)):     # False runs [s, e)
+        if 0 < s and e < len(flag) and e - s <= max_gap:
+            out[s:e] = True
+    return out
+
+
+def stopped_v6(b: np.ndarray, players: np.ndarray, speed_mean: np.ndarray, share_slow: np.ndarray, fps: float,
+               pitch) -> pd.DataFrame:
+    """v6 (team, from the CSV and the video): the whistle stops the players, not the ball.
+
+    u_unplayed_s     seconds since everyone braked sharply while the ball kept its path untouched (no change of
+                     direction over 35 degrees, no jump of speed) -- the ball rolling on after the whistle; 0 once
+                     someone plays it again
+    m2_open_s        "the ball went out / vanished at a line" memory that closes only on a REAL restart: the
+                     ball starting from slow / still / held / reappearing TOGETHER with the players speeding up.
+                     A kick without the team speeding up is the ball being returned and does not close it.
+                     Timeout: open > 20 s while play has looked clearly alive for 5 s
+    m2_returns       touches (kicks, passes back) since the ball went out while the memory is open
+    s2_team_stopped_s seconds the team has been mostly slow (share under 1 m/s averaged over 1 s > 0.4, dips under
+                     1 s ignored) -- no ball needed
+    s2_slow_nob_s    the same while the ball is missing (smoothed s_slow_nob_s)
+    """
+    L, W = pitch
+    n = len(b)
+    bx, by = b[:, 0].astype(np.float64), b[:, 1].astype(np.float64)
+    seen = ~np.isnan(bx)
+    w = max(1, int(round(0.2 * fps)))
+    vx = np.full(n, np.nan); vy = np.full(n, np.nan)
+    if n > 2 * w:
+        vx[w:-w] = (bx[2 * w:] - bx[:-2 * w]) * fps / (2 * w)
+        vy[w:-w] = (by[2 * w:] - by[:-2 * w]) * fps / (2 * w)
+    sp = np.hypot(vx, vy)
+    k4 = max(1, int(round(0.4 * fps)))
+    vx0, vy0, sp0 = np.roll(vx, k4), np.roll(vy, k4), np.roll(sp, k4)
+    vx0[:k4] = vy0[:k4] = sp0[:k4] = np.nan
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cosang = (vx * vx0 + vy * vy0) / (sp * sp0)
+    touch = seen & (((sp > 1.5) & (sp0 > 1.5) & (cosang < np.cos(np.radians(35)))) | (sp - sp0 > 3.0))
+    touch = np.nan_to_num(touch, nan=0).astype(bool)
+
+    s = pd.Series(speed_mean)
+    w1 = max(1, int(round(fps)))
+    d1 = (s[::-1].rolling(w1, min_periods=1).mean()[::-1] - s.rolling(w1, min_periods=1).mean()).to_numpy()
+    brake, go = d1 < -0.8, d1 > 0.6
+    since_brake, since_touch = _since(brake, fps, 30.0), _since(touch, fps, 30.0)
+    unplayed = np.where(seen & (since_touch > since_brake) & (since_brake < 30.0), since_brake, 0.0)
+
+    with np.errstate(invalid="ignore"):
+        dline = np.minimum.reduce([bx, L - bx, by, W - by])
+    out_event = seen & (dline < -0.3)
+    starts = np.flatnonzero(np.diff(np.r_[1, seen.astype(np.int8)]) == -1)
+    for g in starts:
+        if g > 0 and seen[g - 1] and dline[g - 1] < 2.0:
+            out_event[g] = True
+    appear = seen & ~np.roll(seen, k4)
+    ball_start = seen & (((sp > 4.0) & (sp0 < 2.0)) | appear)
+    go_near = pd.Series(go.astype(np.float64)).rolling(int(4 * fps) + 1, center=True, min_periods=1).max().to_numpy() > 0
+    restart = ball_start & go_near
+    slow1 = pd.Series(np.nan_to_num(share_slow)).rolling(w1, center=True, min_periods=1).mean().to_numpy()
+    sp3 = s.rolling(int(3 * fps), center=True, min_periods=1).mean().to_numpy()
+    alive_look = (np.nan_to_num(sp3) > 2.2) & (slow1 < 0.25)
+    alive_run = _run_s(alive_look, fps)
+
+    open_s = np.zeros(n); returns = np.zeros(n)
+    t_open, nret = -1.0, 0
+    for i in range(n):                                    # sequential: open / close / timeout
+        if out_event[i]:
+            t_open, nret = 0.0, 0
+        elif t_open >= 0:
+            t_open += 1.0 / fps
+            if restart[i] or (t_open > 20.0 and alive_run[i] >= 5.0):
+                t_open = -1.0
+            elif touch[i]:
+                nret += 1
+        open_s[i] = min(t_open, 120.0) if t_open >= 0 else 0.0
+        returns[i] = nret if t_open >= 0 else 0
+    stopped = _bridge(slow1 > 0.4, int(fps))
+    slow_nob = _bridge((~seen) & (slow1 > 0.3), int(fps))
+    return pd.DataFrame({"u_unplayed_s": unplayed, "m2_open_s": open_s, "m2_returns": returns,
+                         "s2_team_stopped_s": _run_s(stopped, fps), "s2_slow_nob_s": _run_s(slow_nob, fps),
+                         "s2_slow_1s": slow1})
+
+
+def stopped_v7(b: np.ndarray, speed_mean: np.ndarray, share_slow: np.ndarray, fps: float, pitch) -> pd.DataFrame:
+    """v7 "CR7" (team, from the v6 CSV): stoppages end at the RESTART, not when speeds drift back up.
+
+    restart          a clear kick (ball from under 2 m/s to over 6 m/s within 0.4 s) or the ball reappearing,
+                     with the players starting to speed up within 2 s (mean speed next 1 s minus last 1 s > 0.4)
+    m3_open_s        "went out" memory. Opens ONLY on a real out: the ball seen beyond a line, or last seen within
+                     1 m of a line moving outward. Closes on a restart; after a 10 s timeout it closes as soon as
+                     play has looked clearly alive for 3 s (players fast, few slow); unconditionally after 120 s
+    m3_returns       touches while the memory is open AND the whole team is stopped (the ball being returned)
+    s3_team_stopped_s seconds the team has been mostly slow (1 s share > 0.4, dips < 1 s bridged); switched OFF at a
+                     restart and kept off until the players have actually sped up and stopped again
+    s3_slow_nob_s    the same, only while the ball is missing
+    r_since_restart_s / r_until_restart_s   seconds since the last / until the next restart (offline: both known)
+    """
+    L, W = pitch
+    n = len(b)
+    bx, by = b[:, 0].astype(np.float64), b[:, 1].astype(np.float64)
+    seen = ~np.isnan(bx)
+    w = max(1, int(round(0.2 * fps)))
+    vx = np.full(n, np.nan); vy = np.full(n, np.nan)
+    if n > 2 * w:
+        vx[w:-w] = (bx[2 * w:] - bx[:-2 * w]) * fps / (2 * w)
+        vy[w:-w] = (by[2 * w:] - by[:-2 * w]) * fps / (2 * w)
+    sp = np.hypot(vx, vy)
+    k4 = max(1, int(round(0.4 * fps)))
+    sp0 = np.roll(sp, k4); sp0[:k4] = np.nan
+    vx0, vy0 = np.roll(vx, k4), np.roll(vy, k4)
+    vx0[:k4] = vy0[:k4] = np.nan
+    with np.errstate(invalid="ignore", divide="ignore"):
+        cosang = (vx * vx0 + vy * vy0) / (sp * sp0)
+        touch = seen & (((sp > 1.5) & (sp0 > 1.5) & (cosang < np.cos(np.radians(35)))) | (sp - sp0 > 3.0))
+        dline = np.minimum.reduce([bx, L - bx, by, W - by])
+    touch = np.nan_to_num(touch, nan=0).astype(bool)
+
+    # a REAL out: seen beyond a line, or vanishing within 1 m of a line while moving outward
+    out_event = seen & (dline < -0.3)
+    for g in np.flatnonzero(np.diff(np.r_[1, seen.astype(np.int8)]) == -1):
+        f = g - 1
+        f0 = f - 2 * w                                    # direction over the last 0.4 s BEFORE it vanished
+        if f0 < 0 or not seen[f] or not seen[f0] or not (dline[f] < 1.0):
+            continue
+        ux, uy = (bx[f] - bx[f0]) * fps / (2 * w), (by[f] - by[f0]) * fps / (2 * w)
+        x, y = bx[f], by[f]
+        outward = ((x < 1.0 and ux < -1.0) or (x > L - 1.0 and ux > 1.0)
+                   or (y < 1.0 and uy < -1.0) or (y > W - 1.0 and uy > 1.0))
+        out_event[g] = bool(outward)
+
+    s = pd.Series(speed_mean)
+    w1 = max(1, int(round(fps)))
+    d1 = (s[::-1].rolling(w1, min_periods=1).mean()[::-1] - s.rolling(w1, min_periods=1).mean()).to_numpy()
+    fut_speed = pd.Series((d1 > 0.4).astype(np.float64))[::-1].rolling(int(2 * fps) + 1, min_periods=1).max()[::-1]
+    kick = seen & (sp > 6.0) & (np.nan_to_num(sp0, nan=99.0) < 2.0)
+    appear = seen & ~np.roll(seen, k4)
+    restart = (kick | appear) & (fut_speed.to_numpy() > 0)
+
+    slow1 = pd.Series(np.nan_to_num(share_slow)).rolling(w1, center=True, min_periods=1).mean().to_numpy()
+    sp3 = s.rolling(int(3 * fps), center=True, min_periods=1).mean().to_numpy()
+    alive_run = _run_s((np.nan_to_num(sp3) > 2.2) & (slow1 < 0.25), fps)
+    stopped_raw = _bridge(slow1 > 0.4, int(fps))
+    nob_raw = _bridge((~seen) & (slow1 > 0.3), int(fps))
+
+    open_s = np.zeros(n); returns = np.zeros(n); team = np.zeros(n); nob = np.zeros(n)
+    t_open, nret, t_team, t_nob = -1.0, 0, 0.0, 0.0
+    blocked = False                                       # after a restart: off until the team has sped up
+    dt = 1.0 / fps
+    for i in range(n):
+        if restart[i]:
+            blocked, t_team, t_nob = True, 0.0, 0.0
+        if blocked and slow1[i] < 0.4:
+            blocked = False
+        t_team = t_team + dt if (stopped_raw[i] and not blocked) else 0.0
+        t_nob = t_nob + dt if (nob_raw[i] and not blocked) else 0.0
+        team[i], nob[i] = min(t_team, 120.0), min(t_nob, 120.0)
+        if out_event[i]:
+            t_open, nret = 0.0, 0
+        elif t_open >= 0:
+            t_open += dt
+            if restart[i] or (t_open > 10.0 and alive_run[i] >= 3.0) or t_open > 120.0:
+                t_open = -1.0
+            elif touch[i] and t_team > 0:
+                nret += 1
+        open_s[i] = t_open if t_open >= 0 else 0.0
+        returns[i] = nret if t_open >= 0 else 0
+    return pd.DataFrame({"m3_open_s": open_s, "m3_returns": returns, "s3_team_stopped_s": team,
+                         "s3_slow_nob_s": nob, "r_since_restart_s": _since(restart, fps),
+                         "r_until_restart_s": _since(restart[::-1], fps)[::-1]})
+
+
+def keeper_v8(b: np.ndarray, players: np.ndarray, fps: float, pitch) -> pd.DataFrame:
+    """v8 (team, our match: a save and catch called dead). A keeper holding the ball is IN PLAY (Law 12; every
+    training source labels it so). Geometry only -- a keeper's kit is often given the wrong team:
+
+    k_hold           ball tracked in a penalty area, within 1.2 m of the player deepest toward that goal (+-1 m),
+                     under 3 m/s; carried into a ball gap that starts while he holds it (lost in his hands, up to 10 s)
+    k_hold_s         seconds of the current hold (dips under 0.5 s bridged);  k_hold_3s  its share over 3 s
+    k_since_shot_s   seconds since a shot: the ball over 12 m/s, heading to the nearer goal, in the final 35 m
+    k_save_hold      a hold that starts within 5 s of a shot (a save and catch)
+    """
+    L, W = pitch
+    n = len(b)
+    bx, by = b[:, 0].astype(np.float64), b[:, 1].astype(np.float64)
+    seen = ~np.isnan(bx)
+    w = max(1, int(round(0.2 * fps)))
+    vx = np.full(n, np.nan); vy = np.full(n, np.nan)
+    if n > 2 * w:
+        vx[w:-w] = (bx[2 * w:] - bx[:-2 * w]) * fps / (2 * w)
+        vy[w:-w] = (by[2 * w:] - by[:-2 * w]) * fps / (2 * w)
+    sp = np.hypot(vx, vy)
+    if n > 2 * w:                                         # at a gap's edge: speed from the frames BEFORE it
+        back = np.full(n, np.nan)
+        back[2 * w:] = np.hypot(bx[2 * w:] - bx[:-2 * w], by[2 * w:] - by[:-2 * w]) * fps / (2 * w)
+        sp = np.where(np.isnan(sp), back, sp)
+    with np.errstate(invalid="ignore"):
+        in_box_l = seen & (bx < 16.5) & (np.abs(by - W / 2) < 20.16)
+        in_box_r = seen & (bx > L - 16.5) & (np.abs(by - W / 2) < 20.16)
+        P = players.astype(np.float64)
+        d = np.linalg.norm(P - b[:, None, :].astype(np.float64), axis=-1)
+    d = np.where(np.isnan(d), np.inf, d)
+    k = np.argmin(d, axis=1)
+    near = d[np.arange(n), k]
+    xs = P[..., 0]
+    depth_l = np.where(np.isnan(xs), np.inf, xs)
+    depth_r = np.where(np.isnan(xs), np.inf, L - xs)
+    deepest_l = depth_l[np.arange(n), k] <= depth_l.min(axis=1) + 1.0
+    deepest_r = depth_r[np.arange(n), k] <= depth_r.min(axis=1) + 1.0
+    with np.errstate(invalid="ignore"):
+        hold = ((in_box_l & deepest_l) | (in_box_r & deepest_r)) & (near < 1.2) & (np.nan_to_num(sp, nan=99.0) < 3.0)
+    for g in np.flatnonzero(np.diff(np.r_[1, seen.astype(np.int8)]) == -1):   # lost in his hands
+        if g > 0 and hold[g - 1]:
+            e = g
+            while e < n and not seen[e] and e - g < int(10 * fps):
+                e += 1
+            hold[g:e] = True
+    with np.errstate(invalid="ignore"):
+        to_left = (bx < L / 2) & (vx < 0)
+        to_right = (bx >= L / 2) & (vx > 0)
+        final35 = (bx < 35.0) | (bx > L - 35.0)
+        shot = seen & (sp > 12.0) & (to_left | to_right) & final35
+    since_shot = _since(np.nan_to_num(shot, nan=0).astype(bool), fps, 60.0)
+    hold_b = _bridge(hold, int(0.5 * fps))
+    hold_s = _run_s(hold_b, fps)
+    start = hold_b & ~np.r_[False, hold_b[:-1]]
+    save_start = start & (since_shot < 5.0)
+    save_hold = np.zeros(n, dtype=bool)
+    for s0 in np.flatnonzero(save_start):
+        e = s0
+        while e < n and hold_b[e]:
+            e += 1
+        save_hold[s0:e] = True
+    return pd.DataFrame({"k_hold": hold.astype(np.float64), "k_hold_s": hold_s,
+                         "k_hold_3s": _roll(hold.astype(np.float64), int(round(3 * fps))),
+                         "k_since_shot_s": since_shot, "k_save_hold": save_hold.astype(np.float64)})
+
+
 def build(players, team, b, fps, pitch, halves) -> pd.DataFrame:
     """(n, F) inputs, NaN outside the halves. Older models read only the columns they were trained on."""
     P = dead.features(players, team, fps, pitch, halves)
@@ -210,7 +451,11 @@ def build(players, team, b, fps, pitch, halves) -> pd.DataFrame:
     X = pd.concat([P, ball(b, fps, pitch), edges(P["speed_mean"].to_numpy(), fps),
                    state(P["speed_mean"].to_numpy(), P["share_slow"].to_numpy(), seen, fps),
                    setpiece(players, np.asarray(team), b, fps),
-                   memory(b, players, P["share_slow"].to_numpy(), fps, pitch)], axis=1)
+                   memory(b, players, P["share_slow"].to_numpy(), fps, pitch),
+                   stopped_v6(b, players, P["speed_mean"].to_numpy(), P["share_slow"].to_numpy(), fps, pitch),
+                   stopped_v7(b, P["speed_mean"].to_numpy(), P["share_slow"].to_numpy(), fps, pitch),
+                   keeper_v8(b, players, fps, pitch)],
+                  axis=1)
     inside = np.zeros(len(X), dtype=bool)
     for _, a, z in halves:
         inside[a:z + 1] = True

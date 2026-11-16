@@ -185,12 +185,61 @@ def run_lengths(gt: np.ndarray, halves, fps: float) -> dict:
     return out
 
 
+PL_COLS_EXTRA = ("pl_p", "pl_p_3s", "pl_p_10s", "pl_p_min3s", "pl_p_back2s", "pl_p_fwd2s")
+
+
+def _pl_rolling(pp: np.ndarray, per_s: float) -> dict:
+    """The players-only P(dead) and its 3 s mean, 10 s mean and 3 s minimum (sustained = high minimum)."""
+    s = pd.Series(pp)
+    w3, w10 = max(1, int(round(3 * per_s))), max(1, int(round(10 * per_s)))
+    return {"pl_p": pp, "pl_p_3s": s.rolling(w3, center=True, min_periods=1).mean().to_numpy(),
+            "pl_p_10s": s.rolling(w10, center=True, min_periods=1).mean().to_numpy(),
+            "pl_p_min3s": s.rolling(w3, center=True, min_periods=1).min().to_numpy(),
+            # v7: one-sided views, so a sudden restart is a step, not smeared over a centred window
+            "pl_p_back2s": s.rolling(w2 := max(1, int(round(2 * per_s))), min_periods=1).mean().to_numpy(),
+            "pl_p_fwd2s": s[::-1].rolling(w2, min_periods=1).mean()[::-1].to_numpy()}
+
+
+def dead_feature_names() -> list:
+    """Column names of mqf.dead.features (Joao's players-only inputs)."""
+    from .. import dead
+    n = 300
+    P = dead.features(np.zeros((n, 2, 2)), np.array([0, 1]), 25, (105.0, 68.0), ((1, 0, n - 1),))
+    return list(P.columns)
+
+
+def _stack_players(X: pd.DataFrame, y, w, groups, segs, seed: int) -> dict:
+    """Joao's idea as an input: a P(dead) that looks ONLY at the players, so a moving ball cannot override it.
+    Out-of-fold by game (4 folds) on the training rows, so the main model learns how far to trust it on games
+    the players model did not see; then fitted on all rows for new games. Adds PL_COLS_EXTRA to X (in place)."""
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.model_selection import GroupKFold
+    names = set(dead_feature_names())
+    pcols = [c for c in X.columns if c in names]
+    mk = lambda: HistGradientBoostingClassifier(max_iter=250, learning_rate=0.05, max_leaf_nodes=31,
+                                                min_samples_leaf=200, l2_regularization=1.0, early_stopping=False,
+                                                random_state=seed)
+    Xp = X[pcols].to_numpy(np.float32)
+    oof = np.zeros(len(y))
+    for k, (tr, te) in enumerate(GroupKFold(n_splits=4).split(Xp, y, groups)):
+        oof[te] = mk().fit(Xp[tr], y[tr], sample_weight=w[tr]).predict_proba(Xp[te])[:, 1]
+        print(f"  players-only fold {k + 1}/4", flush=True)
+    extra = {c: np.zeros(len(y)) for c in PL_COLS_EXTRA}
+    for sg in np.unique(segs):                         # rows of one copy x half are consecutive, 0.2 s apart
+        sel = np.flatnonzero(segs == sg)
+        for c, v in _pl_rolling(oof[sel], SAMPLE_HZ).items():
+            extra[c][sel] = v
+    for c in PL_COLS_EXTRA:
+        X[c] = extra[c].astype(np.float32)
+    return {"model": mk().fit(Xp, y, sample_weight=w), "columns": pcols}
+
+
 def train(tag: str, iters: int = 400, seed: int = 0, drift: bool = False, kept_share: float = 0.0,
-          carried_share: float = 0.0) -> dict:
+          carried_share: float = 0.0, stack_players: bool = False) -> dict:
     from sklearn.ensemble import HistGradientBoostingClassifier
     import joblib
     t0 = time.time()
-    Xs, ys, srcs, names = [], [], [], []
+    Xs, ys, srcs, names, groups, segs = [], [], [], [], [], []
     lengths = {"dead": [], "alive": []}
     for source, copy, spec, trk, gt in training_games(seed, drift, kept_share, carried_share):
         X = features.build(trk.players, trk.team_of_slot, trk.ball, spec.fps, spec.pitch, spec.halves)
@@ -200,6 +249,11 @@ def train(tag: str, iters: int = 400, seed: int = 0, drift: bool = False, kept_s
         Xs.append(X.iloc[idx].astype(np.float32))
         ys.append((gt[idx] == "D").astype(np.int8))
         srcs.append(np.full(len(idx), source))
+        groups.append(np.full(len(idx), spec.name))                       # the game: folds never split it
+        half_of = np.zeros(spec.n_frames, dtype=np.int16)
+        for h, a, b in spec.halves:
+            half_of[a:b + 1] = h
+        segs.append(np.char.add(f"{len(names)}_", half_of[idx].astype(str)))   # copy x half: rolling windows
         if copy != "dropouts":
             for key, v in run_lengths(gt, spec.halves, spec.fps).items():
                 lengths[key] += v
@@ -211,16 +265,19 @@ def train(tag: str, iters: int = 400, seed: int = 0, drift: bool = False, kept_s
     w = np.ones(len(y))
     for s in np.unique(src):
         w[src == s] = len(y) / (len(np.unique(src)) * (src == s).sum())
+    players_model = None
+    if stack_players:                    # v6: a players-only P(dead) as an input, out-of-fold by game
+        players_model = _stack_players(X, y, w, np.concatenate(groups), np.concatenate(segs), seed)
     print(f"train {len(names)} game copies, {len(X):,} frames ({y.mean():.1%} dead), {X.shape[1]} inputs", flush=True)
     model = HistGradientBoostingClassifier(max_iter=iters, learning_rate=0.05, max_leaf_nodes=63, min_samples_leaf=200,
                                            l2_regularization=1.0, early_stopping=False, random_state=seed)
     model.fit(X.to_numpy(), y, sample_weight=w)
     meta = {"tag": tag, "train": names, "frames": int(len(X)), "inputs": int(X.shape[1]),
-            "prior": float(np.average(y, weights=w)), "iters": iters, "seed": seed, "drift": drift, "kept_share": kept_share, "carried_share": carried_share,
+            "prior": float(np.average(y, weights=w)), "iters": iters, "seed": seed, "drift": drift, "kept_share": kept_share, "carried_share": carried_share, "stack_players": stack_players,
             "n_stoppages": len(lengths["dead"]), "n_play": len(lengths["alive"])}
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     path = MODELS_DIR / f"deadball_{tag}.joblib"
-    joblib.dump({"model": model, "columns": list(X.columns), "meta": meta,
+    joblib.dump({"model": model, "columns": list(X.columns), "meta": meta, "players_model": players_model,
                  "lengths": {k: np.asarray(v, dtype=np.float64) for k, v in lengths.items()}}, path)
     HARNESS_DIR.mkdir(parents=True, exist_ok=True)
     (HARNESS_DIR / f"deadball_train_{tag}.json").write_text(json.dumps(meta, indent=2))
@@ -233,6 +290,22 @@ def load(path):
     return joblib.load(path)
 
 
+def add_players_columns(X: pd.DataFrame, m: dict, spec) -> pd.DataFrame:
+    """v6: add the players-only P(dead) and its rolling views (PL_COLS_EXTRA) to X, in place, when the model
+    carries a players model; a no-op for older models."""
+    if not m.get("players_model"):
+        return X
+    pm = m["players_model"]
+    extra = {c: np.full(len(X), np.nan) for c in PL_COLS_EXTRA}
+    for _, a, b in spec.halves:
+        pp = pm["model"].predict_proba(X.iloc[a:b + 1][pm["columns"]].to_numpy(np.float32))[:, 1]
+        for c, v in _pl_rolling(pp, spec.fps).items():
+            extra[c][a:b + 1] = v
+    for c in PL_COLS_EXTRA:
+        X[c] = extra[c]
+    return X
+
+
 def predict(m: dict, trk, spec) -> np.ndarray:
     """(n,) P(dead) inside the halves, NaN outside; rounded to 1e-4 (reproducible downstream)."""
     X = features.build(trk.players, trk.team_of_slot, trk.ball, spec.fps, spec.pitch, spec.halves)
@@ -240,6 +313,7 @@ def predict(m: dict, trk, spec) -> np.ndarray:
     inside = np.zeros(len(X), dtype=bool)
     for _, a, b in spec.halves:
         inside[a:b + 1] = True
+    add_players_columns(X, m, spec)
     if inside.any():
         p[inside] = m["model"].predict_proba(X.loc[inside, m["columns"]].to_numpy(np.float32))[:, 1]
     return np.round(p, 4)
@@ -257,8 +331,10 @@ def main(argv=None) -> int:
                    help="with --drift: share of IDSSE / Metrica copies whose ball stays visible in stoppages")
     t.add_argument("--carried-share", type=float, default=0.0,
                    help="with --drift: share of IDSSE / Metrica copies whose stoppage ball is carried like play (v5)")
+    t.add_argument("--stack-players", action="store_true",
+                   help="v6: a players-only P(dead) as an input (out-of-fold by game in training)")
     a = ap.parse_args(argv)
-    train(a.tag, a.iters, a.seed, a.drift, a.kept_share, a.carried_share)
+    train(a.tag, a.iters, a.seed, a.drift, a.kept_share, a.carried_share, a.stack_players)
     return 0
 
 
