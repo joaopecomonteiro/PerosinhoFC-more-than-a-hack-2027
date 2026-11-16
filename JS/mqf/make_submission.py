@@ -8,8 +8,9 @@
     python -m mqf.make_submission --team <team_name> --dead-model models/dead_v1.joblib   # + learned P(dead)
     python -m mqf.make_submission --team <team_name> --who-model models/who_v1.joblib     # + learned P(home | alive)
     python -m mqf.make_submission --team <team_name> ... --params dead_who=max       # decoder overrides (decode.Params)
-    python -m mqf.make_submission --team <team_name> ... --alive-model models/alive_gbm_full_impff.joblib \
-        --alive-variant start+min2 [--alive-tag-w 1]   # the mqf.alive layer instead of --dead-model (opt-in)
+    python -m mqf.make_submission --team <team_name> ... --alive-model models/alive_asf_full_impff_s0.pt \
+        models/alive_asf_full_impff_s1.pt models/alive_asf_full_impff_s2.pt [--alive-variant start] [--alive-tag-w 1]
+                                                     # the mqf.alive layer instead of --dead-model (opt-in; several = mean)
 
 Writes results/<team>.csv (+ .json run report) and runs the OFFICIAL validator.
 Deterministic: same data + same code -> byte-identical file. The run options and decoder parameters
@@ -56,6 +57,13 @@ def parse_params(items) -> dict:
     return out
 
 
+def _alive_opt(alive_model):
+    """The alive model(s) as saved in the run report: None, one posix path, or a list of them."""
+    from .alive.predict import alive_paths
+    ps = [p.as_posix() for p in alive_paths(alive_model)]
+    return None if not ps else (ps[0] if len(ps) == 1 else ps)
+
+
 def _model_file(p) -> Path | None:
     """A model path as given, or under the package root when relative and not found from here."""
     if p is None:
@@ -89,7 +97,8 @@ def settings(args, saved: dict | None = None) -> tuple[dict, decode.Params]:
         from .alive import combine as acombine
         acombine.parse_variant(opts["alive_variant"])
         params = replace(decode.Params(), **parse_params(args.params))
-    return {k: (Path(v) if k in _PATH_OPTS and v else v) for k, v in opts.items()}, params
+    return {k: (Path(v) if k in _PATH_OPTS and v and not isinstance(v, (list, tuple)) else v)
+            for k, v in opts.items()}, params
 
 
 def _non_default(params: decode.Params) -> dict:
@@ -123,7 +132,7 @@ def fill_ball(trk: atd.Tracking, spec, model_path: Path | None = None):
 
 def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tracks: bool = False,
         ball_fill: bool = False, ball_model: Path | None = None, dead_model: Path | None = None,
-        who_model: Path | None = None, alive_model: Path | None = None, alive_variant: str = "hmm",
+        who_model: Path | None = None, alive_model=None, alive_variant: str = "hmm",
         alive_tag_w: float = 0.0, alive_goal_w: float = 0.0) -> dict:
     t0 = time.time()
     trk = atd.load(spec)
@@ -141,9 +150,10 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
     p_dead = None
     alive_on = bool(alive_model) or alive_variant != "hmm" or alive_tag_w > 0
     p_bnd = rr = None
-    if alive_model:
+    if alive_model:                   # one model or several (averaged, as experiment.py's --ensemble)
         from .alive import predict as apredict
-        p_dead, p_bnd, rr = apredict.p_dead(_model_file(alive_model), trk.players, trk.team_of_slot, tracked_ball,
+        alive_files = [_model_file(p) for p in apredict.alive_paths(alive_model)]
+        p_dead, p_bnd, rr = apredict.p_dead(alive_files, trk.players, trk.team_of_slot, tracked_ball,
                                             spec.fps, spec.pitch, spec.halves, device="cpu")
     elif alive_on:
         from .alive import predict as apredict
@@ -195,7 +205,7 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
                           "ball_model": Path(ball_model).as_posix() if ball_model else None,
                           "dead_model": Path(dead_model).as_posix() if dead_model else None,
                           "who_model": Path(who_model).as_posix() if who_model else None,
-                          **({"alive_model": Path(alive_model).as_posix() if alive_model else None,
+                          **({"alive_model": _alive_opt(alive_model),
                               "alive_variant": alive_variant, "alive_tag_w": alive_tag_w, "alive_goal_w": alive_goal_w}
                              if alive_on else {})},
               "params": asdict(params)}
@@ -215,8 +225,9 @@ def main():
     ap.add_argument("--dead-model", type=Path, default=None, help="learned P(dead) (mqf.dead), e.g. models/dead_v1.joblib")
     ap.add_argument("--who-model", type=Path, default=None, help="learned P(home | alive) (mqf.who), e.g. models/who_v1.joblib")
     ap.add_argument("--params", nargs="*", default=[], metavar="KEY=VALUE", help="decoder overrides, e.g. dead_who=max")
-    ap.add_argument("--alive-model", type=Path, default=None,
-                    help="learned P(dead) of mqf.alive (replaces --dead-model), e.g. models/alive_gbm_full_impff.joblib")
+    ap.add_argument("--alive-model", nargs="+", type=Path, default=None,
+                    help="learned P(dead) of mqf.alive (replaces --dead-model); several = their mean, e.g. "
+                         "models/alive_asf_full_impff_s0.pt models/alive_asf_full_impff_s1.pt models/alive_asf_full_impff_s2.pt")
     ap.add_argument("--alive-variant", default="hmm", help="mqf.alive decoder variant, e.g. start+min2 (combine.py)")
     ap.add_argument("--alive-tag-w", type=float, default=0.0, help="Smart Tagging dead prior weight (SET PIECES windows)")
     ap.add_argument("--alive-goal-w", type=float, default=0.0, help="dead prior after GOALS windows (not validated)")

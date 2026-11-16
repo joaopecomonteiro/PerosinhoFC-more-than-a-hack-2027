@@ -337,3 +337,27 @@ def test_make_submission_alive_options(tmp_path, tiny, official):
     assert rep["options"]["alive_variant"] == "start+min2" and rep["alive"]["set_piece_windows"] > 0
     r4 = run(tmp_path / "bad.csv", "--alive-model", str(tiny["stack"]), "--dead-model", "models/dead_v1.joblib")
     assert r4.returncode != 0
+    ens = tmp_path / "ens.csv"                                                # several models: their mean
+    r5 = run(ens, "--alive-model", str(tiny["gbm"]), str(tiny["stack"]))
+    assert r5.returncode == 0, r5.stderr[-500:]
+    rep = json.loads(ens.with_suffix(".json").read_text())
+    assert isinstance(rep["options"]["alive_model"], list) and len(rep["options"]["alive_model"]) == 2
+    import argparse
+    from mqf import make_submission
+    from mqf.config import SYNTHETIC_DIR
+    opts, params = make_submission.settings(argparse.Namespace(final=False), rep)    # what --reproduce does
+    again = tmp_path / "ens_again.csv"
+    make_submission.run(synthetic.generate(SYNTHETIC_DIR), params, again, **opts)
+    assert again.read_bytes() == ens.read_bytes()
+
+
+def test_predict_ensemble_matches_experiment_mean(tiny):
+    from mqf.alive import predict
+    from mqf.alive.models import AliveModel
+    g = _games([66])[0]
+    p, pb, rr = predict.p_dead(f"{tiny['gbm']},{tiny['stack']}", g.players, g.team, g.ball, g.fps, g.pitch, g.halves)
+    X = feats.features(g.players, g.team, g.ball, g.fps, g.pitch, g.halves)
+    a = AliveModel.load(tiny["gbm"]).predict(X, g.halves, len(X), g.fps)[0]
+    b = AliveModel.load(tiny["stack"]).predict(X, g.halves, len(X), g.fps)[0]
+    assert np.array_equal(p, np.round(np.mean(np.stack([a, b]), axis=0), 4), equal_nan=True) and pb is None
+    assert rr is not None and rr["dead"].shape == p.shape
