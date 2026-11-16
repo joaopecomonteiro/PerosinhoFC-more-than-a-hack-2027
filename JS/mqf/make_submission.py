@@ -55,8 +55,9 @@ FINAL = {"options": {"use_tags": True, "clean_tracks": True, "ball_fill": True, 
 FINAL_V1 = {"options": {"use_tags": True, "clean_tracks": True, "ball_fill": True, "ball_model": None,
                         "dead_model": "models/dead_v1.joblib", "who_model": "models/who_v1.joblib"},
             "params": {"dead_who": "max"}}
-_PATH_OPTS = ("ball_model", "dead_model", "who_model", "alive_model")
-_ALIVE_DEFAULTS = {"alive_model": None, "alive_variant": "hmm", "alive_tag_w": 0.0, "alive_goal_w": 0.0}
+_PATH_OPTS = ("ball_model", "dead_model", "who_model", "alive_model", "deadball_model")
+_ALIVE_DEFAULTS = {"alive_model": None, "alive_variant": "hmm", "alive_tag_w": 0.0, "alive_goal_w": 0.0,
+                   "deadball_model": None, "deadball_decoder": "hsmm", "deadball_prior": 0.5}
 _WHO_BND_ALPHA = 0.5
 
 
@@ -99,9 +100,13 @@ def settings(args, saved: dict | None = None) -> tuple[dict, decode.Params]:
         params = decode.Params(**saved.get("params", {}))
     elif args.final:
         given = [f for f in ("no_tags", "clean_tracks", "ball_fill", "ball_model", "dead_model", "who_model", "params",
-                             "alive_model", "alive_tag_w", "alive_goal_w") if getattr(args, f, None)]
+                             "alive_model", "alive_tag_w", "alive_goal_w", "deadball_model") if getattr(args, f, None)]
         if getattr(args, "who_bnd_alpha", None) is not None:
             given.append("who_bnd_alpha")
+        if getattr(args, "deadball_decoder", "hsmm") != "hsmm":
+            given.append("deadball_decoder")
+        if getattr(args, "deadball_prior", 0.5) != 0.5:
+            given.append("deadball_prior")
         if getattr(args, "alive_variant", "hmm") != "hmm":
             given.append("alive_variant")
         if given:
@@ -117,6 +122,10 @@ def settings(args, saved: dict | None = None) -> tuple[dict, decode.Params]:
                 **{k: getattr(args, k, v) for k, v in _ALIVE_DEFAULTS.items()}}
         if opts["alive_model"] and opts["dead_model"]:
             raise SystemExit("--alive-model replaces --dead-model: give one of them")
+        if opts["deadball_model"] and opts["dead_model"]:
+            raise SystemExit("--deadball-model replaces --dead-model: give one of them")
+        if opts["deadball_model"] and opts["alive_model"] and opts["deadball_decoder"] != "hmm":
+            raise SystemExit("--deadball-model with --alive-model averages their P(dead): needs --deadball-decoder hmm")
         from .alive import combine as acombine
         acombine.parse_variant(opts["alive_variant"])
         params = replace(decode.Params(), **parse_params(args.params))
@@ -156,7 +165,8 @@ def fill_ball(trk: atd.Tracking, spec, model_path: Path | None = None):
 def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tracks: bool = False,
         ball_fill: bool = False, ball_model: Path | None = None, dead_model: Path | None = None,
         who_model=None, alive_model=None, alive_variant: str = "hmm",
-        alive_tag_w: float = 0.0, alive_goal_w: float = 0.0, who_bnd_alpha: float = _WHO_BND_ALPHA) -> dict:
+        alive_tag_w: float = 0.0, alive_goal_w: float = 0.0, who_bnd_alpha: float = _WHO_BND_ALPHA,
+        deadball_model=None, deadball_decoder: str = "hsmm", deadball_prior: float = 0.5) -> dict:
     t0 = time.time()
     trk = atd.load(spec)
     clean_report = None
@@ -181,6 +191,18 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
     elif alive_on:
         from .alive import predict as apredict
         rr = apredict.rules_only(trk.players, trk.team_of_slot, tracked_ball, spec.fps, spec.pitch, spec.halves)
+    dead_mask = None
+    if deadball_model:                # mqf.deadball (Italo's v8): its P(dead); "hsmm" = its own semi-Markov decoder
+        from .deadball import decoder as ddec, model as dmod
+        dm = dmod.load(_model_file(deadball_model))
+        p_db = dmod.predict(dm, atd.Tracking(trk.players, trk.player_speed, tracked_ball.astype(np.float32),
+                                             trk.team_of_slot), spec)
+        if deadball_decoder == "hsmm":
+            tables = ddec.length_tables(dm["lengths"]["alive"]), ddec.length_tables(dm["lengths"]["dead"])
+            dead_mask = ddec.decode(p_db, spec.halves, spec.fps, tables, w=0.2, prior=deadball_prior)
+        elif deadball_decoder != "hmm":
+            raise SystemExit(f"--deadball-decoder must be hsmm or hmm, got {deadball_decoder!r}")
+        p_dead = p_db if p_dead is None else np.round(np.mean(np.stack([p_dead, p_db]), axis=0), 4)
     if dead_model:
         from . import dead
         p_dead = dead.predict(dead.load_model(_model_file(dead_model)), trk.players, trk.team_of_slot, spec.fps, spec.pitch,
@@ -204,7 +226,11 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
     if use_tags and spec.smart_tagging and Path(spec.smart_tagging).exists():
         tags = smart_tagging.evidence(spec.smart_tagging, spec.atd_meta, spec.n_frames, spec.fps)
     alive_report = None
-    if alive_on or sw_t is not None:  # the mqf.alive decoder (its "hmm" variant = decode.decode, bit for bit)
+    if dead_mask is not None:         # stoppages fixed by the deadball decoder, possession decoded inside them
+        from .alive import combine as acombine
+        labels = acombine.decode_masked(feat, dead_mask, spec.halves, spec.n_frames, params, sw_t, tags)
+        alive_report = {"deadball_decoder": "hsmm", "deadball_prior": deadball_prior}
+    elif alive_on or sw_t is not None:  # the mqf.alive decoder (its "hmm" variant = decode.decode, bit for bit)
         from .alive import combine as acombine
         variant, tb = alive_variant, None
         if alive_tag_w > 0 or alive_goal_w > 0:
@@ -238,6 +264,8 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
                           "dead_model": Path(dead_model).as_posix() if dead_model else None,
                           "who_model": _alive_opt(who_model),
                           **({"who_bnd_alpha": who_bnd_alpha} if pb_who is not None else {}),
+                          **({"deadball_model": Path(deadball_model).as_posix(), "deadball_decoder": deadball_decoder,
+                              "deadball_prior": deadball_prior} if deadball_model else {}),
                           **({"alive_model": _alive_opt(alive_model),
                               "alive_variant": alive_variant, "alive_tag_w": alive_tag_w, "alive_goal_w": alive_goal_w}
                              if alive_on else {})},
@@ -269,6 +297,12 @@ def main():
     ap.add_argument("--alive-variant", default="hmm", help="mqf.alive decoder variant, e.g. start+min2 (combine.py)")
     ap.add_argument("--alive-tag-w", type=float, default=0.0, help="Smart Tagging dead prior weight (SET PIECES windows)")
     ap.add_argument("--alive-goal-w", type=float, default=0.0, help="dead prior after GOALS windows (not validated)")
+    ap.add_argument("--deadball-model", type=Path, default=None,
+                    help="mqf.deadball P(dead) (Italo's models/deadball_v8.joblib) instead of --dead-model; with "
+                         "--alive-model and --deadball-decoder hmm: the mean of the two")
+    ap.add_argument("--deadball-decoder", default="hsmm", choices=["hsmm", "hmm"],
+                    help="hsmm: its own semi-Markov decoder fixes the stoppages; hmm: its P(dead) in our HMM")
+    ap.add_argument("--deadball-prior", type=float, default=0.5, help="hsmm decoder prior (0.5 = the frozen v8)")
     ap.add_argument("--out", type=Path, help="override output path")
     ap.add_argument("--reproduce", action="store_true",
                     help="regenerate into cache/reproduce/ and check it is byte-identical to results/<team>.csv")

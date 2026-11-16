@@ -29,6 +29,9 @@ Methods (P(dead) per frame), each decoded with every --variants entry (combine.p
   rules      rules.py's soft P(dead)                    <name>    every --models name=path (AliveModel)
   <e>        --ensemble <e>=<m1>,<m2>,..: mean P(dead) and mean boundary (members: models or earlier ensembles)
   <b>+prod / <b>+override   hybrids of the rules with each --hybrid-base b
+  <d>        every --deadball d=path[:prior] (a mqf.deadball model, e.g. Italo's v8): its P(dead) in the HMM
+  <d>_hsmm   the same model through ITS OWN semi-Markov decoder (w 0.2, prior: :prior, else 0.5 = the frozen v8
+             setting): a fixed stoppage mask, possession decoded inside it (combine.decode_masked), variant "hsmm"
   oracle     the true alive mask (2-state decoder inside it): the ceiling
 bnd<a> uses the method's own boundary, or --bnd-from's for methods without one.
 tags uses tag-like windows simulated from the labels (recall --tag-recall, --tag-fp per 90') with weight --tag-w.
@@ -182,10 +185,22 @@ def evidence(spec, trk, who_paths, ball_model, ball_path, device, key_extra, use
 
 # ------------------------------------------------------------------------------------ one game
 
-def dead_methods(X, rr, spec, models: dict, ensembles: dict, hybrid_bases, device="cpu"):
-    """{method: P(dead) or None (v0)}, {method: P(boundary)}."""
+def deadball_methods(trk, spec, deadball: dict):
+    """mqf.deadball models: ({name: P(dead)}, {name_hsmm: dead mask of its own decoder}). trk: TRACKED ball."""
+    from ..deadball import decoder as ddec, model as dmod
+    P, M = {}, {}
+    for name, (m, prior) in deadball.items():
+        p = dmod.predict(m, trk, spec)
+        P[name] = p
+        tables = ddec.length_tables(m["lengths"]["alive"]), ddec.length_tables(m["lengths"]["dead"])
+        M[f"{name}_hsmm"] = ddec.decode(p, spec.halves, spec.fps, tables, w=0.2, prior=prior)
+    return P, M
+
+
+def dead_methods(X, rr, spec, models: dict, ensembles: dict, hybrid_bases, device="cpu", extra_p=None):
+    """{method: P(dead) or None (v0)}, {method: P(boundary)}. extra_p: P(dead) of other methods (deadball)."""
     n, fps, halves = spec.n_frames, spec.fps, spec.halves
-    P = {"v0": None, "rules": rr["p_dead"]}
+    P = {"v0": None, "rules": rr["p_dead"], **(extra_p or {})}
     PB = {}
     for name, m in models.items():
         P[name], pb = m.predict(X, halves, n, fps, device)
@@ -207,7 +222,7 @@ def dead_methods(X, rr, spec, models: dict, ensembles: dict, hybrid_bases, devic
 
 
 def run_game(spec, trk, gt, ball_f, filled, p_home, pb_who, P, PB, rr, variants, params, meta, who_alpha,
-             bnd_from=None, tag_cfg=None, variant_methods=None):
+             bnd_from=None, tag_cfg=None, variant_methods=None, masks=None):
     from ..owner import combine as ocombine
     n, fps, halves = spec.n_frames, spec.fps, spec.halves
     tracking = atd.Tracking(trk.players, trk.player_speed, np.asarray(ball_f, dtype=np.float32), trk.team_of_slot)
@@ -238,6 +253,10 @@ def run_game(spec, trk, gt, ball_f, filled, p_home, pb_who, P, PB, rr, variants,
                 continue
             rows.append({**meta, "method": name, "variant": v, **score(gt, lab, fps),
                          **combine.stoppage_stats(gt, lab, halves, fps)})
+    for name, mask in (masks or {}).items():
+        lab = combine.decode_masked(feat, mask, halves, n, params, sw_t)
+        rows.append({**meta, "method": name, "variant": "hsmm", **score(gt, lab, fps),
+                     **combine.stoppage_stats(gt, lab, halves, fps)})
     return rows
 
 
@@ -312,6 +331,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--models", nargs="*", default=[], metavar="NAME=PATH")
     ap.add_argument("--ensemble", nargs="*", default=[], metavar="NAME=M1,M2")
     ap.add_argument("--hybrid-base", nargs="*", default=[])
+    ap.add_argument("--deadball", nargs="*", default=[], metavar="NAME=PATH[:PRIOR]",
+                    help="mqf.deadball models (e.g. v8=models/deadball_v8.joblib:0.5): P(dead) in the HMM + own decoder")
     ap.add_argument("--variants", nargs="*", default=["hmm"], help="decoder variants (combine.py), e.g. hmm start+min2")
     ap.add_argument("--variant-methods", nargs="*", default=None,
                     help="methods that get every variant (default: all); the others get hmm only")
@@ -342,15 +363,23 @@ def _setup(a_dict: dict):
     rule_cfg = rules.parse_rule_cfg(a.rule_cfg)
     models = {"dead_v1": AliveModel.load(a.dead_model)}
     models.update({k: AliveModel.load(p) for k, p in parse_models(a.models).items()})
+    deadball = {}
+    for it in a.deadball:
+        name, eq, rest = it.partition("=")
+        if not eq or not rest or name in models:
+            raise SystemExit(f"--deadball: expected NAME=PATH[:PRIOR], got {it!r}")
+        path, _, prior = rest.rpartition(":") if rest.rsplit(":", 1)[-1].replace(".", "", 1).isdigit() else (rest, "", "")
+        from ..deadball import model as dmod
+        deadball[name] = (dmod.load(Path(path)), float(prior) if prior else 0.5)
     ensembles = {}
     for it in a.ensemble:
         e, eq, members = it.partition("=")
-        if not eq or not members or e in models:
+        if not eq or not members or e in models or e in deadball:
             raise SystemExit(f"--ensemble: expected NAME=M1,M2 with a new NAME, got {it!r}")
         ensembles[e] = members.split(",")
-        bad = [m for m in ensembles[e] if m not in models and m not in list(ensembles)[:-1]]
+        bad = [m for m in ensembles[e] if m not in models and m not in deadball and m not in list(ensembles)[:-1]]
         if bad:
-            raise SystemExit(f"--ensemble {e}: {bad} not in --models")
+            raise SystemExit(f"--ensemble {e}: {bad} not in --models / --deadball")
     device = "cpu"
     try:
         import torch
@@ -366,6 +395,7 @@ def _setup(a_dict: dict):
                                                  "seed": a.tag_seed}
     _CTX.clear()
     _CTX.update(a=a, params=params, rule_cfg=rule_cfg, models=models, ensembles=ensembles, device=device,
+                deadball=deadball,
                 ball_model=ball_model, ball_path=ball_path, noise_cfg=parse_noise(a.noise) if a.noise else None,
                 who=parse_who(a.who), tag_cfg=tag_cfg)
 
@@ -383,11 +413,12 @@ def _job(job):
                                               not a.no_cache)
     X, rr = feats.features(trk.players, trk.team_of_slot, trk.ball, spec.fps, spec.pitch, spec.halves,
                            "full_rules", c["rule_cfg"], return_rules=True)
-    P, PB = dead_methods(X, rr, spec, c["models"], c["ensembles"], a.hybrid_base, c["device"])
+    P_db, masks = deadball_methods(trk, spec, c["deadball"]) if c["deadball"] else ({}, {})
+    P, PB = dead_methods(X, rr, spec, c["models"], c["ensembles"], a.hybrid_base, c["device"], P_db)
     del X
     meta = {"game": spec.name, "source": source, "seed": seed, "condition": a.condition, "ball_mode": mode}
     r = run_game(spec, trk, gt, ball_f, filled, p_home, pb_who, P, PB, rr, a.variants, c["params"], meta,
-                 a.who_bnd_alpha, a.bnd_from, c["tag_cfg"], a.variant_methods)
+                 a.who_bnd_alpha, a.bnd_from, c["tag_cfg"], a.variant_methods, masks)
     dt = time.time() - t0
     best = sorted(((x["spellF1"], x["method"], x["variant"]) for x in r if x["method"] != "oracle"), reverse=True)[:3]
     orc = next(x["spellF1"] for x in r if x["method"] == "oracle")
@@ -444,7 +475,7 @@ def main(argv=None) -> int:
     cfg = {"tag": a.tag, "condition": a.condition, "ball_modes": a.ball_modes, "seeds": seeds, "noise": a.noise,
            "clean_tracks": a.clean_tracks, "who": a.who, "who_bnd_alpha": a.who_bnd_alpha,
            "models": {k: str(v) for k, v in parse_models(a.models).items()}, "dead_model": str(a.dead_model),
-           "ensemble": a.ensemble, "hybrid_base": a.hybrid_base, "variants": a.variants,
+           "ensemble": a.ensemble, "deadball": a.deadball, "hybrid_base": a.hybrid_base, "variants": a.variants,
            "variant_methods": a.variant_methods, "bnd_from": a.bnd_from, "tags": c["tag_cfg"],
            "params": asdict(c["params"]), "rule_cfg": asdict(c["rule_cfg"]), "ball_fill": not a.no_ball_fill,
            "fuzzy": FUZZY, "split": a.split, "sources": a.source, "jobs": a.jobs,

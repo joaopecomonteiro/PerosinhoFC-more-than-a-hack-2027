@@ -224,6 +224,25 @@ def decode_hmm(feat, p_dead, halves, n: int, params: decode.Params, p_bnd=None, 
     return lab
 
 
+def decode_masked(feat, dead_mask, halves, n: int, params: decode.Params, sw_t=None, tags=None) -> np.ndarray:
+    """Labels when an outside decoder already decided WHERE the ball is dead (mqf.deadball's semi-Markov
+    decoder): the production emissions (P(home), Smart Tagging votes) with D forced on dead_mask and
+    forbidden elsewhere, then the same Viterbi -- so possession is decoded inside the given stoppages
+    exactly as the HMM would, and the harness measures what the submission would write."""
+    f = feat.drop(columns=["p_dead_model"]) if "p_dead_model" in feat else feat
+    ll = decode.emissions(f, params, tags).astype(np.float64).copy()
+    m = np.asarray(dead_mask, dtype=bool)
+    ll[m, 0] = ll[m, 1] = -1e6
+    ll[~m, 2] = -1e6
+    lab = np.full(n, "X", dtype="<U1")
+    for _, a, b in halves:
+        sl = slice(a, b + 1)
+        path = viterbi3(ll[sl], params.switch_cost if sw_t is None else sw_t[sl], params.to_dead_cost,
+                        params.from_dead_cost)
+        lab[sl] = np.array(LABELS)[path]
+    return lab
+
+
 def _fill(lab: np.ndarray, s: int, e: int, lo: int, hi: int):
     """Relabel lab[s:e] (a D run) from its alive neighbours inside [lo, hi): the same team on both sides
     -> that team; two teams -> split at the middle; one side only -> that side."""

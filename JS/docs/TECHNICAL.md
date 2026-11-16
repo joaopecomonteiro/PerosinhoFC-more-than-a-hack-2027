@@ -167,6 +167,16 @@ missing ball overlaps its stoppages is unknown; a change is kept only if it pass
 the production decoder bit for bit. Result (#42): the ASFormer-lite ensemble +0.030 … +0.049 spellF1 over
 dead_v1 in every condition and ball mode; it is the dead-ball layer of `FINAL` from 16 Nov (#43).
 
+**A second dead-ball line (`mqf/deadball/`, Italo, EXPERIMENTS #44).** Developed on its own branch and ported
+into `JS/`: a gradient-boosted P(dead) on dead_v1's player inputs plus ball inputs (gaps, restart spots, off
+the pitch, still, speed), slow-down / speed-up edges, a "went out" memory closed only by a restart, a keeper
+holding the ball in his box (in play, Law 12) and a players-only P(dead) stacked out-of-fold by game; trained
+on the same 63 training games with the ball's loss in stoppages randomised per copy (whole, partial, drifting
+gaps, kept visible, carried like play — assumptions about trackers, never calibrated on BAR-ATH). Its decoder
+is a two-state semi-Markov Viterbi at 5 Hz whose state lengths are the real stoppage / play lengths of the
+training games. It is compared with the mqf.alive models on the validation games with the official metric
+(`mqf.alive.final_check`), both as a P(dead) for our HMM and with its own decoder.
+
 **Who has the ball (`mqf/who.py`, in validation).** The ground truth is ownership: the last team in
 control keeps the ball while it flies, bounces or is contested. v0's "team of the nearest player
 now" was right on ~78–79 % of alive frames of the validation games. A per-frame

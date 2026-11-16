@@ -342,6 +342,17 @@ def test_make_submission_alive_options(tmp_path, tiny, official):
     assert r5.returncode == 0, r5.stderr[-500:]
     rep = json.loads(ens.with_suffix(".json").read_text())
     assert isinstance(rep["options"]["alive_model"], list) and len(rep["options"]["alive_model"]) == 2
+    from mqf.config import ROOT
+    if (ROOT / "models" / "deadball_v8.joblib").is_file():                   # Italo's v8: own decoder / blended
+        r7 = run(tmp_path / "v8.csv", "--deadball-model", "models/deadball_v8.joblib")
+        assert r7.returncode == 0, r7.stderr[-500:]
+        o7 = json.loads((tmp_path / "v8.json").read_text())
+        assert o7["alive"]["deadball_decoder"] == "hsmm" and o7["options"]["deadball_prior"] == 0.5
+        r8 = run(tmp_path / "v8b.csv", "--deadball-model", "models/deadball_v8.joblib", "--deadball-decoder", "hmm",
+                 "--alive-model", str(tiny["gbm"]))
+        assert r8.returncode == 0, r8.stderr[-500:]
+        r9 = run(tmp_path / "bad2.csv", "--deadball-model", "models/deadball_v8.joblib", "--alive-model", str(tiny["gbm"]))
+        assert r9.returncode != 0                                             # blend needs the hmm decoder
     import argparse
     from mqf import make_submission
     from mqf.config import SYNTHETIC_DIR
@@ -420,5 +431,20 @@ def test_final_check_quick(tmp_path, monkeypatch, tiny, official):
     monkeypatch.setattr(experiment, "EVIDENCE_CACHE", tmp_path / "ev")
     assert final_check.main(["--quick", "--no-ball-fill", "--device", "cpu", "--tag", "fc"]) == 0
     text = (tmp_path / "final_check_fc.md").read_text(encoding="utf-8")
-    assert "new − old (spellF1)" in text and "who_v1 × dead_v1" in text and "tcn × asf" in text
+    assert "new FINAL − old FINAL" in text and "who_v1 × dead_v1" in text and "tcn × asf" in text
     assert "PASS" in text or "FAIL" in text
+    if (ROOT / "models" / "deadball_v8.joblib").is_file():                   # Italo's v8 in both forms
+        assert "v8 + its semi-Markov decoder" in text and "mean(asf, v8)" in text and "tcn: v8 P(dead) in our HMM − asf" in text
+
+
+def test_decode_masked_respects_the_mask():
+    m, trk, feat, pdd, rr = _feat_and_p()
+    n = len(pdd)
+    mask = np.zeros(n, dtype=bool)
+    mask[2000:2500] = mask[7000:7100] = True
+    lab = combine.decode_masked(feat, mask, HALVES, n, decode.Params(dead_who="max"))
+    ins = np.zeros(n, dtype=bool)
+    for _, a, b in HALVES:
+        ins[a:b + 1] = True
+    assert (lab[mask & ins] == "D").all() and not (lab[~mask & ins] == "D").any()
+    assert set(np.unique(lab[~mask & ins])) <= {"H", "A"}

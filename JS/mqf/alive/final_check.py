@@ -1,14 +1,15 @@
-"""Old FINAL vs new FINAL on the harness: possession model x dead-ball model, 2 x 2, other games only.
+"""Old FINAL vs new FINAL on the harness: possession model x dead-ball model (incl. Italo's v8), other games only.
 
     python -m mqf.alive.final_check --jobs 3            # ~1 h on the GPU (WHO evidence of who_v1 is cached
                                                         # from the alive16 suite when it ran on this machine)
     python -m mqf.alive.final_check --quick             # 1 val game per source, bar only (smoke)
 
-The four combinations, on the same 11 val games, conditions and noise seeds as #40 / #42:
+Possession {who_v1, owner TCN (3 seeds + its boundary)} x dead ball {dead_v1, asf (3 seeds, mqf.alive),
+and -- when models/deadball_v8.joblib is there -- Italo's v8 (mqf.deadball): its P(dead) in our HMM, v8 with
+its own semi-Markov decoder (prior 0.5, his frozen setting; possession decoded inside its stoppages), and
+mean(asf, v8)}, on the same 11 val games, conditions and noise seeds as #40 / #42:
 
-    possession \\ dead ball    dead_v1            asf (3 seeds, mqf.alive)
-    who_v1                     FINAL_V1 (old)     alive only
-    owner TCN (3 seeds + bnd)  possession only    FINAL (new)
+    who_v1 x dead_v1 = FINAL_V1 (old)        owner TCN x asf = FINAL (new)
 
 The model paths come from make_submission.FINAL / FINAL_V1 (one source of truth). Conditions: bar (ball
 exact / fuzzy / random), atd (noise seeds 0 1, ball fuzzy / exact), atd_flip (seed 0, ball fuzzy); tracks
@@ -35,19 +36,32 @@ CONDITIONS = {"bar": ["--condition", "bar", "--ball-modes", "exact", "fuzzy", "r
               "atd": ["--condition", "atd", "--seeds", "0", "1", "--ball-modes", "fuzzy", "exact"],
               "atd_flip": ["--condition", "atd", "--seeds", "0", "--noise", "team_flip_p=0.05", "gk_team_flip_p=0.5",
                            "--ball-modes", "fuzzy"]}
-COMBOS = {"old (FINAL_V1)": ("who_v1", "dead_v1"), "possession only": ("tcn", "dead_v1"),
-          "alive only": ("who_v1", "asf"), "new (FINAL)": ("tcn", "asf")}
+DEAD = [("dead_v1", "hmm"), ("asf", "hmm"), ("v8", "hmm"), ("v8_hsmm", "hsmm"), ("asf_v8", "hmm")]
+DEAD_LABEL = {"dead_v1": "dead_v1", "asf": "asf (mqf.alive, 3 seeds)", "v8": "v8 P(dead) in our HMM",
+              "v8_hsmm": "v8 + its semi-Markov decoder (prior 0.5)", "asf_v8": "mean(asf, v8) in our HMM"}
+WHOS = ("who_v1", "tcn")
+OLD, NEW = ("who_v1", "dead_v1", "hmm"), ("tcn", "asf", "hmm")
+
+
+def _sel(df, key):
+    w, m, v = key
+    return df[(df.who == w) & (df.method == m) & (df.variant == v)]
 
 
 def _paired(df, a, b, col="spellF1"):
-    x = df[(df.who == a[0]) & (df.method == a[1])].set_index(["game", "seed"])[col]
-    y = df[(df.who == b[0]) & (df.method == b[1])].set_index(["game", "seed"])[col]
+    x = _sel(df, a).set_index(["game", "seed"])[col]
+    y = _sel(df, b).set_index(["game", "seed"])[col]
     idx = x.index.intersection(y.index)
     if not len(idx):
         return None
     d = (x[idx] - y[idx]).to_numpy()
     se = float(d.std(ddof=1) / np.sqrt(len(d))) if len(d) > 1 else float("nan")
     return {"mean": float(d.mean()), "se": se, "wins": int((d > 0).sum()), "n": len(d)}
+
+
+def _passes(rs: dict) -> bool:
+    return all(r is not None and np.isfinite(r["se"]) and r["mean"] > 2 * r["se"] and 2 * r["wins"] > r["n"]
+               for r in rs.values())
 
 
 def _fmt(r):
@@ -59,44 +73,56 @@ def _fmt(r):
 
 def report(rows: list[dict], tag: str) -> str:
     df = pd.DataFrame(rows)
-    df = df[df.variant.isin(["hmm", "-"])]
-    cols = []
-    groups = {}
+    groups, cols = {}, []
     for (cl, mode), g in df.groupby(["cond_label", "ball_mode"], sort=False):
         groups[f"{cl}/{mode}"] = g
         cols.append(f"{cl}/{mode}")
-    out = [f"# Final check `{tag}`: old FINAL vs new FINAL (other games only)\n",
-           "spellF1, mean per source then over sources; Δ paired per game × noise seed: mean (se) wins/n.\n",
-           "| combination (possession × dead ball) | " + " | ".join(cols) + " |", "|---|" + "---|" * len(cols)]
-    for label, (w, m) in COMBOS.items():
-        cells = []
-        for c in cols:
-            g = groups[c]
-            g = g[(g.who == w) & (g.method == m)]
-            cells.append(f"{g.groupby('source').spellF1.mean().mean():.3f}" if len(g) else "—")
-        out.append(f"| {label}: {w} × {m} | " + " | ".join(cells) + " |")
-    cells = []
+    have = set(zip(df.who, df.method, df.variant))
+    out = [f"# Final check `{tag}`: possession model × dead-ball model (other games only)\n",
+           "spellF1, mean per source then over sources; Δ paired per game × noise seed: mean (se) wins/n. "
+           "A row passes when its Δ > 2 se and it wins more than half the runs in EVERY column (#38).\n",
+           "| possession × dead ball | " + " | ".join(cols) + " | mean |", "|---|" + "---|" * (len(cols) + 1)]
+    for w in WHOS:
+        for m, v in DEAD:
+            if (w, m, v) not in have:
+                continue
+            vals = []
+            for c in cols:
+                g = _sel(groups[c], (w, m, v))
+                vals.append(g.groupby("source").spellF1.mean().mean() if len(g) else float("nan"))
+            mark = " **(new FINAL)**" if (w, m, v) == NEW else (" (old FINAL)" if (w, m, v) == OLD else "")
+            out.append(f"| {w} × {DEAD_LABEL[m]}{mark} | " + " | ".join(f"{x:.3f}" for x in vals)
+                       + f" | {np.nanmean(vals):.3f} |")
+    vals = []
     for c in cols:
-        g = groups[c]
-        g = g[(g.who == "who_v1") & (g.method == "oracle")]
-        cells.append(f"{g.groupby('source').spellF1.mean().mean():.3f}" if len(g) else "—")
-    out.append("| (true alive mask, who_v1) | " + " | ".join(cells) + " |")
-    out += ["", "| comparison | " + " | ".join(cols) + " |", "|---|" + "---|" * len(cols)]
-    comps = [("new − old (spellF1)", COMBOS["new (FINAL)"], COMBOS["old (FINAL_V1)"], "spellF1"),
-             ("new − possession only", COMBOS["new (FINAL)"], COMBOS["possession only"], "spellF1"),
-             ("new − alive only", COMBOS["new (FINAL)"], COMBOS["alive only"], "spellF1"),
-             ("new − old (macroF1)", COMBOS["new (FINAL)"], COMBOS["old (FINAL_V1)"], "macroF1")]
-    verdict = None
-    for label, a, b, col in comps:
-        rs = {c: _paired(groups[c], a, b, col) for c in cols}
-        out.append(f"| {label} | " + " | ".join(_fmt(rs[c]) for c in cols) + " |")
-        if label.startswith("new − old (spell"):
-            ok = all(r is not None and np.isfinite(r["se"]) and r["mean"] > 2 * r["se"] and 2 * r["wins"] > r["n"]
-                     for r in rs.values())
-            verdict = ok
+        g = groups[c][(groups[c].who == "who_v1") & (groups[c].method == "oracle")]
+        vals.append(g.groupby("source").spellF1.mean().mean() if len(g) else float("nan"))
+    out.append("| who_v1 × true alive mask (ceiling) | " + " | ".join(f"{x:.3f}" for x in vals) + f" | {np.nanmean(vals):.3f} |")
+    comps = [("**new FINAL − old FINAL**", NEW, OLD), ("possession only (tcn × dead_v1) − old", ("tcn", "dead_v1", "hmm"), OLD),
+             ("alive only (who_v1 × asf) − old", ("who_v1", "asf", "hmm"), OLD),
+             ("new FINAL − tcn × dead_v1 (the gains add up?)", NEW, ("tcn", "dead_v1", "hmm"))]
+    for w in WHOS:
+        for m, v in DEAD[2:]:
+            comps.append((f"{w}: {DEAD_LABEL[m]} − asf", (w, m, v), (w, "asf", "hmm")))
+        comps.append((f"{w}: v8 + its decoder − dead_v1", (w, "v8_hsmm", "hsmm"), (w, "dead_v1", "hmm")))
+    out += ["", "| comparison (spellF1) | " + " | ".join(cols) + " | passes |", "|---|" + "---|" * (len(cols) + 1)]
+    verdict = {}
+    for label, a, b in comps:
+        if a not in have or b not in have:
+            continue
+        rs = {c: _paired(groups[c], a, b) for c in cols}
+        ok = _passes(rs)
+        verdict[label] = ok
+        out.append(f"| {label} | " + " | ".join(_fmt(rs[c]) for c in cols) + f" | {'PASS' if ok else 'no'} |")
+    rs = {c: _paired(groups[c], NEW, OLD, "macroF1") for c in cols}
+    out.append("| new FINAL − old FINAL (macroF1) | " + " | ".join(_fmt(rs[c]) for c in cols) + " | |")
     out.append("")
-    out.append("**PASS**: the new FINAL beats the old one in every column (#38 rule)." if verdict else
-               "**FAIL**: the new FINAL does not beat the old one in every column -- do not submit it; send this table.")
+    out.append("**PASS**: the new FINAL beats the old one in every column." if verdict.get("**new FINAL − old FINAL**")
+               else "**FAIL**: the new FINAL does not beat the old one in every column -- do not submit it; send this table.")
+    alts = [k for k, ok in verdict.items() if k.startswith("tcn:") and k.endswith("− asf") and ok]
+    out.append(("Better than asf under the new possession model, in every column: " + "; ".join(alts) + " -- "
+                "consider it for FINAL.") if alts else
+               "Nothing beats asf under the new possession model in every column: keep asf in FINAL.")
     return "\n".join(out) + "\n"
 
 
@@ -107,6 +133,7 @@ def main(argv=None) -> int:
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--skip", nargs="*", default=[], choices=list(CONDITIONS))
     ap.add_argument("--no-ball-fill", action="store_true")
+    ap.add_argument("--no-v8", action="store_true", help="leave out Italo's mqf.deadball v8 (models/deadball_v8.joblib)")
     ap.add_argument("--tag", default="final16")
     a = ap.parse_args(argv)
     from ..make_submission import FINAL, FINAL_V1
@@ -119,9 +146,12 @@ def main(argv=None) -> int:
     missing = [p for p in [*asf, *who_tcn] if not (ROOT / p).is_file()]
     if missing:
         raise SystemExit(f"missing model files: {missing} (train them, or copy them into models/)")
+    v8 = ROOT / "models" / "deadball_v8.joblib"
+    use_v8 = v8.is_file() and not a.no_v8
     base = ["--split", "val", "--source", "idsse", "metrica", "pff", "--clean-tracks", "--device", a.device,
             "--jobs", str(a.jobs), "--models", *[f"asf_s{k}={ROOT / p}" for k, p in enumerate(asf)],
             "--ensemble", "asf=" + ",".join(f"asf_s{k}" for k in range(len(asf))),
+            *(["asf_v8=asf,v8", "--deadball", f"v8={v8}:0.5"] if use_v8 else []),
             "--variants", "hmm", "--params", *[f"{k}={v}" for k, v in FINAL["params"].items()],
             "--who-bnd-alpha", str(fin.get("who_bnd_alpha", 0.5))]
     if a.quick:

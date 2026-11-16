@@ -1,0 +1,344 @@
+"""P(ball dead) per frame, learned on other games.
+
+    python -m mqf.deadball.model train --tag v1     # -> models/deadball_v1.joblib
+
+Training games (splits.json "train"): IDSSE 5 + Metrica 2, each twice -- the full ATD noise model
+(46 anonymous slots, bursty ball loss, dropouts, duplicates) and player dropouts only -- and PFF 56
+as they are (broadcast tracking that loses the ball in stoppages on its own) with player dropouts.
+How a tracker treats the ball in a stoppage is a property of the tracker, so for IDSSE / Metrica it
+is RANDOMISED per game copy: the ball is removed for a whole stoppage with probability p ~ U(0.3, 1),
+else for a random stretch of it. Frames every 0.2 s inside the halves; label = dead or not; every
+source weighs the same in total. The saved file also holds the lengths of the real stoppages and
+stretches of play, for the decoder.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import time
+import zlib
+from dataclasses import replace
+
+import numpy as np
+import pandas as pd
+
+from ..config import HARNESS_DIR, MODELS_DIR
+from . import features
+
+SAMPLE_HZ = 5.0
+
+
+def hide_stoppage_ball(b: np.ndarray, gt: np.ndarray, p_whole: float, rng) -> np.ndarray:
+    """Remove the ball in true stoppages: the whole stoppage with probability p_whole, else a random
+    stretch of it (a tracker sometimes keeps a placed or held ball)."""
+    out = b.copy()
+    d = np.diff(np.r_[0, (gt == "D").astype(np.int8), 0])
+    for s, e in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1)):
+        if rng.random() < p_whole:
+            out[s:e] = np.nan
+        else:
+            n = e - s
+            a = s + int(rng.integers(0, max(1, n // 2)))
+            out[a:min(e, a + int(rng.integers(1, max(2, n))))] = np.nan
+    return out
+
+
+def drift_ball_loss(b: np.ndarray, gt: np.ndarray, fps: float, rng, p_whole: float, lead_p: float,
+                    live_per_min: float, lead_max_s: float = 15.0, lag_p: float = 0.3, lag_max_s: float = 2.0,
+                    live_gap_s=(5.0, 40.0)) -> np.ndarray:
+    """Ball loss that does NOT line up with the stoppages, as a broadcast-like or tactical tracker does.
+
+    hide_stoppage_ball first; then a hidden stoppage's gap starts up to lead_max_s EARLIER (in the play
+    leading into it) with probability lead_p and lasts up to lag_max_s past the restart with probability
+    lag_p; and long gaps also occur in open play (live_per_min per minute of play, lengths in
+    live_gap_s). So "the ball is missing" or "a gap just started" is never the answer on its own -- the
+    players and the restart have to say it. Every number is an assumption, randomised in training.
+    """
+    out = hide_stoppage_ball(b, gt, p_whole, rng)
+    n = len(gt)
+    dead = gt == "D"
+    d = np.diff(np.r_[0, dead.astype(np.int8), 0])
+    for s, e in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1)):
+        if not np.isnan(out[s:e, 0]).all():
+            continue                                     # only stoppages whose ball is gone entirely
+        if rng.random() < lead_p:
+            out[max(0, s - int(rng.uniform(0, lead_max_s) * fps)):s] = np.nan
+        if rng.random() < lag_p:
+            out[e:min(n, e + int(rng.uniform(0, lag_max_s) * fps))] = np.nan
+    alive_idx = np.flatnonzero((gt == "H") | (gt == "A"))
+    k = rng.poisson(live_per_min * len(alive_idx) / fps / 60.0)
+    for a in rng.choice(alive_idx, size=min(k, len(alive_idx)), replace=False) if len(alive_idx) else []:
+        out[a:min(n, a + int(rng.uniform(*live_gap_s) * fps))] = np.nan
+    return out
+
+
+def carried_ball(b: np.ndarray, players: np.ndarray, gt: np.ndarray, fps: float, rng, p_carry: float,
+                 roll_s=(1.0, 4.0), put_s=(0.5, 2.0), pass_p: float = 0.4) -> np.ndarray:
+    """v5. A stoppage whose ball stays VISIBLE and MOVES like play: what a tracker shows while players
+    fetch, carry and return the ball (football behaviour, not fitted to any match).
+
+    For each true stoppage, with probability p_carry:
+      roll    the ball keeps its pre-stoppage velocity, slowing down, for roll_s seconds
+      carry   then it travels with the nearest player (0.3-0.8 m from him, his pace), and with
+              probability pass_p it is passed to the next-nearest player (straight line, ~8 m/s)
+      put     put_s seconds before the restart it moves to where play restarts and lies still
+    Other stoppages keep the ball as it is. Every number is an assumption, randomised in training.
+    """
+    out = b.astype(np.float64).copy()
+    P = players.astype(np.float64)
+    n = len(gt)
+    d = np.diff(np.r_[0, (gt == "D").astype(np.int8), 0])
+    k = max(1, int(round(0.2 * fps)))
+    for s, e in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1)):
+        if e - s < int(3 * fps) or s < k + 1 or rng.random() >= p_carry:
+            continue
+        p0 = out[s - 1]
+        if np.isnan(p0).any():
+            continue
+        v0 = (out[s - 1] - out[s - 1 - k]) * fps / k if not np.isnan(out[s - 1 - k]).any() else np.zeros(2)
+        n_roll = min(e - s, int(rng.uniform(*roll_s) * fps))
+        t = np.arange(1, n_roll + 1) / fps
+        tau = 1.5                                         # s: a rolling ball slowing down
+        out[s:s + n_roll] = p0 + v0[None, :] * (tau * (1 - np.exp(-t / tau)))[:, None]
+        n_put = min(e - (s + n_roll), int(rng.uniform(*put_s) * fps))
+        c0, c1 = s + n_roll, e - n_put
+        if c1 > c0:
+            pos = out[c0 - 1].copy()
+            dist = np.linalg.norm(P[c0] - pos, axis=-1)
+            order = np.argsort(np.where(np.isnan(dist), np.inf, dist))
+            carrier = order[0]
+            offset = rng.uniform(0.3, 0.8) * np.array([np.cos(a := rng.uniform(0, 2 * np.pi)), np.sin(a)])
+            t_pass = c0 + int(rng.uniform(0.3, 0.7) * (c1 - c0)) if (rng.random() < pass_p and len(order) > 1) else None
+            f = c0
+            while f < c1:
+                if t_pass is not None and f == t_pass:     # a pass back to the next-nearest player
+                    dd = np.linalg.norm(P[f] - pos, axis=-1)
+                    oo = np.argsort(np.where(np.isnan(dd), np.inf, dd))
+                    target = oo[1] if oo[0] == carrier else oo[0]
+                    tgt = P[f, target]
+                    if not np.isnan(tgt).any():
+                        steps = max(1, int(np.linalg.norm(tgt - pos) / 8.0 * fps))
+                        for j in range(1, steps + 1):
+                            if f >= c1:
+                                break
+                            out[f] = pos + (tgt - pos) * j / steps
+                            f += 1
+                        pos, carrier = out[f - 1].copy(), target
+                        continue
+                q = P[f, carrier]
+                if not np.isnan(q).any():
+                    pos = q + offset
+                out[f] = pos
+                f += 1
+        if n_put > 0:
+            start = out[e - n_put - 1] if e - n_put - 1 >= s else p0
+            end = b[e] if e < n and not np.isnan(b[e]).any() else start
+            m_steps = max(1, int(0.4 * n_put))
+            for j in range(n_put):
+                out[e - n_put + j] = start + (end - start) * min(1.0, (j + 1) / m_steps)
+    return out
+
+
+def with_ball(trk, b):
+    from .. import atd
+    return atd.Tracking(trk.players, trk.player_speed, b.astype(np.float32), trk.team_of_slot)
+
+
+def training_games(seed: int = 0, drift: bool = False, kept_share: float = 0.0, carried_share: float = 0.0):
+    """(source, copy, spec, tracking, gt) for every training game copy. drift: drift_ball_loss (v2)."""
+    from ..external import bundle, splits
+    from ..external.evaluate import load, parse_noise
+    for source in ("idsse", "metrica"):
+        for i, d in enumerate(bundle.find(source, splits.games("train", sources=[source]))):
+            for copy in ("atd_noise", "dropouts"):
+                rng = np.random.default_rng([seed, i, zlib.crc32(f"{source}{copy}".encode())])
+                if copy == "atd_noise":
+                    spec, trk, gt = load(d, noise_cfg=replace(parse_noise([]), seed=1000 + 100 * seed + i))
+                else:
+                    spec, trk, gt = load(d, players_drop=True, seed=1000 + i)
+                r = rng.random()
+                if drift and r < kept_share:             # v4: the ball stays visible through the stoppages
+                    b = trk.ball.astype(np.float64)
+                elif drift and r < kept_share + carried_share:   # v5: visible and moving like play
+                    b = carried_ball(trk.ball, trk.players, gt, spec.fps, rng, p_carry=float(rng.uniform(0.4, 0.9)))
+                elif drift:                              # v2: gaps that do not line up with stoppages
+                    b = drift_ball_loss(trk.ball.astype(np.float64), gt, spec.fps, rng,
+                                        p_whole=float(rng.uniform(0.3, 1.0)), lead_p=float(rng.uniform(0.2, 0.8)),
+                                        live_per_min=float(rng.uniform(0.0, 1.0)))
+                else:
+                    b = hide_stoppage_ball(trk.ball.astype(np.float64), gt, float(rng.uniform(0.3, 1.0)), rng)
+                yield source, copy, spec, with_ball(trk, b), gt
+    for i, d in enumerate(bundle.find("pff", splits.games("train", sources=["pff"]))):
+        spec, trk, gt = load(d, players_drop=True, seed=2000 + i)
+        yield "pff", "natural", spec, trk, gt
+
+
+def run_lengths(gt: np.ndarray, halves, fps: float) -> dict:
+    """Lengths (s) of full stoppages and full stretches of play inside the halves (edge runs dropped)."""
+    out = {"dead": [], "alive": []}
+    for _, a, b in halves:
+        dd = (gt[a:b + 1] == "D").astype(np.int8)
+        bounds = np.r_[0, np.flatnonzero(np.diff(dd)) + 1, len(dd)]
+        for s, e in zip(bounds[:-1], bounds[1:]):
+            if 0 < s and e < len(dd):
+                out["dead" if dd[s] else "alive"].append((e - s) / fps)
+    return out
+
+
+PL_COLS_EXTRA = ("pl_p", "pl_p_3s", "pl_p_10s", "pl_p_min3s", "pl_p_back2s", "pl_p_fwd2s", "pl_p_back1s")
+
+
+def _pl_rolling(pp: np.ndarray, per_s: float) -> dict:
+    """The players-only P(dead) and its 3 s mean, 10 s mean and 3 s minimum (sustained = high minimum)."""
+    s = pd.Series(pp)
+    w3, w10 = max(1, int(round(3 * per_s))), max(1, int(round(10 * per_s)))
+    return {"pl_p": pp, "pl_p_3s": s.rolling(w3, center=True, min_periods=1).mean().to_numpy(),
+            "pl_p_10s": s.rolling(w10, center=True, min_periods=1).mean().to_numpy(),
+            "pl_p_min3s": s.rolling(w3, center=True, min_periods=1).min().to_numpy(),
+            # v7: one-sided views, so a sudden restart is a step, not smeared over a centred window
+            "pl_p_back2s": s.rolling(w2 := max(1, int(round(2 * per_s))), min_periods=1).mean().to_numpy(),
+            "pl_p_fwd2s": s[::-1].rolling(w2, min_periods=1).mean()[::-1].to_numpy(),
+            # v8: the start gate -- have the players stopped over the LAST second? (decoder.start_gate)
+            "pl_p_back1s": s.rolling(max(1, int(round(per_s))), min_periods=1).mean().to_numpy()}
+
+
+def dead_feature_names() -> list:
+    """Column names of mqf.dead.features (Joao's players-only inputs)."""
+    from .. import dead
+    n = 300
+    P = dead.features(np.zeros((n, 2, 2)), np.array([0, 1]), 25, (105.0, 68.0), ((1, 0, n - 1),))
+    return list(P.columns)
+
+
+def _stack_players(X: pd.DataFrame, y, w, groups, segs, seed: int) -> dict:
+    """Joao's idea as an input: a P(dead) that looks ONLY at the players, so a moving ball cannot override it.
+    Out-of-fold by game (4 folds) on the training rows, so the main model learns how far to trust it on games
+    the players model did not see; then fitted on all rows for new games. Adds PL_COLS_EXTRA to X (in place)."""
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    from sklearn.model_selection import GroupKFold
+    names = set(dead_feature_names())
+    pcols = [c for c in X.columns if c in names]
+    mk = lambda: HistGradientBoostingClassifier(max_iter=250, learning_rate=0.05, max_leaf_nodes=31,
+                                                min_samples_leaf=200, l2_regularization=1.0, early_stopping=False,
+                                                random_state=seed)
+    Xp = X[pcols].to_numpy(np.float32)
+    oof = np.zeros(len(y))
+    for k, (tr, te) in enumerate(GroupKFold(n_splits=4).split(Xp, y, groups)):
+        oof[te] = mk().fit(Xp[tr], y[tr], sample_weight=w[tr]).predict_proba(Xp[te])[:, 1]
+        print(f"  players-only fold {k + 1}/4", flush=True)
+    extra = {c: np.zeros(len(y)) for c in PL_COLS_EXTRA}
+    for sg in np.unique(segs):                         # rows of one copy x half are consecutive, 0.2 s apart
+        sel = np.flatnonzero(segs == sg)
+        for c, v in _pl_rolling(oof[sel], SAMPLE_HZ).items():
+            extra[c][sel] = v
+    for c in PL_COLS_EXTRA:
+        X[c] = extra[c].astype(np.float32)
+    return {"model": mk().fit(Xp, y, sample_weight=w), "columns": pcols}
+
+
+def train(tag: str, iters: int = 400, seed: int = 0, drift: bool = False, kept_share: float = 0.0,
+          carried_share: float = 0.0, stack_players: bool = False) -> dict:
+    from sklearn.ensemble import HistGradientBoostingClassifier
+    import joblib
+    t0 = time.time()
+    Xs, ys, srcs, names, groups, segs = [], [], [], [], [], []
+    lengths = {"dead": [], "alive": []}
+    for source, copy, spec, trk, gt in training_games(seed, drift, kept_share, carried_share):
+        X = features.build(trk.players, trk.team_of_slot, trk.ball, spec.fps, spec.pitch, spec.halves)
+        k = max(1, int(round(spec.fps / SAMPLE_HZ)))
+        idx = np.concatenate([np.arange(a, b + 1, k) for _, a, b in spec.halves])
+        idx = idx[np.isin(gt[idx], ["H", "A", "D"])]
+        Xs.append(X.iloc[idx].astype(np.float32))
+        ys.append((gt[idx] == "D").astype(np.int8))
+        srcs.append(np.full(len(idx), source))
+        groups.append(np.full(len(idx), spec.name))                       # the game: folds never split it
+        half_of = np.zeros(spec.n_frames, dtype=np.int16)
+        for h, a, b in spec.halves:
+            half_of[a:b + 1] = h
+        segs.append(np.char.add(f"{len(names)}_", half_of[idx].astype(str)))   # copy x half: rolling windows
+        if copy != "dropouts":
+            for key, v in run_lengths(gt, spec.halves, spec.fps).items():
+                lengths[key] += v
+        names.append(f"{spec.name}:{copy}")
+        print(f"  {spec.name:<14} {copy:<9} {len(idx):>7,} frames  ({time.time() - t0:.0f} s)", flush=True)
+    X = pd.concat(Xs, ignore_index=True)
+    y, src = np.concatenate(ys), np.concatenate(srcs)
+    del Xs
+    w = np.ones(len(y))
+    for s in np.unique(src):
+        w[src == s] = len(y) / (len(np.unique(src)) * (src == s).sum())
+    players_model = None
+    if stack_players:                    # v6: a players-only P(dead) as an input, out-of-fold by game
+        players_model = _stack_players(X, y, w, np.concatenate(groups), np.concatenate(segs), seed)
+    print(f"train {len(names)} game copies, {len(X):,} frames ({y.mean():.1%} dead), {X.shape[1]} inputs", flush=True)
+    model = HistGradientBoostingClassifier(max_iter=iters, learning_rate=0.05, max_leaf_nodes=63, min_samples_leaf=200,
+                                           l2_regularization=1.0, early_stopping=False, random_state=seed)
+    model.fit(X.to_numpy(), y, sample_weight=w)
+    meta = {"tag": tag, "train": names, "frames": int(len(X)), "inputs": int(X.shape[1]),
+            "prior": float(np.average(y, weights=w)), "iters": iters, "seed": seed, "drift": drift, "kept_share": kept_share, "carried_share": carried_share, "stack_players": stack_players,
+            "n_stoppages": len(lengths["dead"]), "n_play": len(lengths["alive"])}
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    path = MODELS_DIR / f"deadball_{tag}.joblib"
+    joblib.dump({"model": model, "columns": list(X.columns), "meta": meta, "players_model": players_model,
+                 "lengths": {k: np.asarray(v, dtype=np.float64) for k, v in lengths.items()}}, path)
+    HARNESS_DIR.mkdir(parents=True, exist_ok=True)
+    (HARNESS_DIR / f"deadball_train_{tag}.json").write_text(json.dumps(meta, indent=2))
+    print(f"wrote {path}  ({time.time() - t0:.0f} s)", flush=True)
+    return meta
+
+
+def load(path):
+    import joblib
+    return joblib.load(path)
+
+
+def add_players_columns(X: pd.DataFrame, m: dict, spec) -> pd.DataFrame:
+    """v6: add the players-only P(dead) and its rolling views (PL_COLS_EXTRA) to X, in place, when the model
+    carries a players model; a no-op for older models."""
+    if not m.get("players_model"):
+        return X
+    pm = m["players_model"]
+    extra = {c: np.full(len(X), np.nan) for c in PL_COLS_EXTRA}
+    for _, a, b in spec.halves:
+        pp = pm["model"].predict_proba(X.iloc[a:b + 1][pm["columns"]].to_numpy(np.float32))[:, 1]
+        for c, v in _pl_rolling(pp, spec.fps).items():
+            extra[c][a:b + 1] = v
+    for c in PL_COLS_EXTRA:
+        X[c] = extra[c]
+    return X
+
+
+def predict(m: dict, trk, spec, return_X: bool = False):
+    """(n,) P(dead) inside the halves, NaN outside; rounded to 1e-4 (reproducible downstream)."""
+    X = features.build(trk.players, trk.team_of_slot, trk.ball, spec.fps, spec.pitch, spec.halves)
+    p = np.full(len(X), np.nan)
+    inside = np.zeros(len(X), dtype=bool)
+    for _, a, b in spec.halves:
+        inside[a:b + 1] = True
+    add_players_columns(X, m, spec)
+    if inside.any():
+        p[inside] = m["model"].predict_proba(X.loc[inside, m["columns"]].to_numpy(np.float32))[:, 1]
+    return (np.round(p, 4), X) if return_X else np.round(p, 4)
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    t = sub.add_parser("train")
+    t.add_argument("--tag", default="v1")
+    t.add_argument("--iters", type=int, default=400)
+    t.add_argument("--seed", type=int, default=0)
+    t.add_argument("--drift", action="store_true", help="ball loss that does not line up with stoppages")
+    t.add_argument("--kept-share", type=float, default=0.0,
+                   help="with --drift: share of IDSSE / Metrica copies whose ball stays visible in stoppages")
+    t.add_argument("--carried-share", type=float, default=0.0,
+                   help="with --drift: share of IDSSE / Metrica copies whose stoppage ball is carried like play (v5)")
+    t.add_argument("--stack-players", action="store_true",
+                   help="v6: a players-only P(dead) as an input (out-of-fold by game in training)")
+    a = ap.parse_args(argv)
+    train(a.tag, a.iters, a.seed, a.drift, a.kept_share, a.carried_share, a.stack_players)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
