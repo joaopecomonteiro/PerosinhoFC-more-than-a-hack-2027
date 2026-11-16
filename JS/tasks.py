@@ -3,6 +3,8 @@
     python tasks.py help
     python tasks.py setup                          # install-dev + bootstrap + test
     python tasks.py submit --team Perosinho_FC     # real match, the submitted recipe -> results/<team>.csv, validated
+    python tasks.py final-harness -- --jobs 3      # old vs new FINAL on the val games (other games only)
+    python tasks.py final-check --team Perosinho_FC  # real match: candidate built, validated, reproduced, compared
     python tasks.py harness -- --noise jitter_corr_s=1.0     # args after -- go to the command
 
 Runs from anywhere (it switches to this folder). Targets marked [REAL DATA] read the match bundle:
@@ -298,6 +300,28 @@ def submit(a, extra):
     """Build results/<team>.csv with the submitted recipe (make_submission --final) and validate it."""
     # `python tasks.py submit -- --who-model ...` builds something else instead (args after -- replace --final)
     run(PY, "-m", "mqf.make_submission", "--team", a.team, *(extra or ["--final"]))
+
+
+@task("final-harness")
+def final_harness(a, extra):
+    """Old FINAL vs new FINAL on the val games (other games only; mqf.alive.final_check, e.g. -- --jobs 3)."""
+    run(PY, "-m", "mqf.alive.final_check", *extra)
+
+
+@task("final-check", real=True)
+def final_check(a, extra):
+    """Before submitting: build <team>_candidate with FINAL, validate, reproduce, compare with <team>, public check."""
+    c = cfg()
+    cand = f"{a.team}_candidate"
+    run(PY, "-m", "mqf.make_submission", "--team", cand, "--final")                     # + official validator
+    run(PY, "-m", "mqf.make_submission", "--team", cand, "--final", "--reproduce")      # byte-identical?
+    if (c.RESULTS_DIR / f"{a.team}.csv").exists():
+        run(PY, "-m", "mqf.compare", a.team, cand)                                      # aggregates only
+    else:
+        print(f"  (no results/{a.team}.csv to compare with)")
+    check(a, extra)                                                                     # correctness only
+    run(PY, "bootstrap.py", "--check-updates", check=False)
+    print(f"\nIf every step passed: python tasks.py submit --team {a.team}  (same recipe -> the file you upload)")
 
 
 @task("check", real=True)

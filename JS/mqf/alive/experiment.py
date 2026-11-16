@@ -150,25 +150,8 @@ def who_evidence(spec, trk, ball_f, filled, who_paths, device="cpu"):
             from .. import who
             return who.predict((o["model"], o["columns"], o.get("meta", {})), trk.players, trk.team_of_slot, ball_f,
                                fps, spec.pitch, halves), None
-    from ..owner import feats as ofeats, rules as orules
-    from ..owner.models import OwnerModel
-    members = [OwnerModel.load(p) for p in who_paths]
-    views = []
-    need_seq = any(m.kind in ("gru", "tcn") for m in members)
-    for k in (0, 1):
-        team = trk.team_of_slot if k == 0 else 1 - trk.team_of_slot
-        X = ofeats.features(trk.players, team, ball_f, fps, spec.pitch, halves, "full_rules_heading", orules.RuleConfig(),
-                            ball_filled=filled)
-        S, sc = ofeats.seq_inputs(trk.players, team, ball_f, fps, spec.pitch, halves, X_full=X, columns="all") \
-            if need_seq else (None, None)
-        views.append({"X": X, "S": S, "seq_columns": sc})
-    ps, pbs = [], []
-    for m in members:
-        p, pb = m.p_home_and_boundary(views, halves, n, fps, device)
-        ps.append(p)
-        if pb is not None:
-            pbs.append(pb)
-    return np.round(np.mean(ps, axis=0), 4), (np.round(np.mean(pbs, axis=0), 4) if pbs else None)
+    from .predict import owner_p_home
+    return owner_p_home(who_paths, trk.players, trk.team_of_slot, ball_f, filled, fps, spec.pitch, halves, device)
 
 
 def evidence(spec, trk, who_paths, ball_model, ball_path, device, key_extra, use_cache=True):

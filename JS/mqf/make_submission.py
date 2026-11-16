@@ -7,6 +7,8 @@
     python -m mqf.make_submission --team <team_name> --ball-fill   # + missing ball filled (needs torch, CPU ok)
     python -m mqf.make_submission --team <team_name> --dead-model models/dead_v1.joblib   # + learned P(dead)
     python -m mqf.make_submission --team <team_name> --who-model models/who_v1.joblib     # + learned P(home | alive)
+    python -m mqf.make_submission --team <team_name> --who-model models/owner_tcn_full_impff_s0.pt \
+        models/owner_tcn_full_impff_s1.pt models/owner_tcn_full_impff_s2.pt   # owner TCN ensemble + its boundary
     python -m mqf.make_submission --team <team_name> ... --params dead_who=max       # decoder overrides (decode.Params)
     python -m mqf.make_submission --team <team_name> ... --alive-model models/alive_asf_full_impff_s0.pt \
         models/alive_asf_full_impff_s1.pt models/alive_asf_full_impff_s2.pt [--alive-variant start] [--alive-tag-w 1]
@@ -33,14 +35,29 @@ import numpy as np
 from . import atd, decode, features, smart_tagging, submission
 from .config import CACHE_DIR, MODELS_DIR, RESULTS_DIR, ROOT, SYNTHETIC_DIR, competition_game
 
-# The submitted configuration (docs/EXPERIMENTS.md #35-#39): learned P(home | alive) and P(dead), the frozen
-# ball fill, the tracklet cleaner and Smart Tagging; the decoder as validated (dead_who="max", #34/#35).
-# Model paths are relative to the package root (JS/). Change it only with a new EXPERIMENTS entry.
+# The submitted configuration. Model paths are relative to the package root (JS/). Change it only with a new
+# EXPERIMENTS entry, and test it before submitting (python tasks.py final-check, docs/EXPERIMENTS.md #43).
+#   possession: the owner TCN ensemble (3 seeds, IDSSE + Metrica + PFF) with its own H <-> A boundary on the
+#               switch cost, alpha 0.5 (#40: +0.048 / +0.050 / +0.054 vs who_v1)
+#   dead ball:  the ASFormer-lite ensemble of mqf.alive (3 seeds, IDSSE + Metrica + PFF; #42: +0.030 ... +0.049
+#               vs dead_v1), production HMM decoder ("hmm"), no Smart Tagging dead prior
+#   as before:  frozen ball fill, tracklet cleaner, Smart Tagging team votes, dead_who="max" (#34/#35)
 FINAL = {"options": {"use_tags": True, "clean_tracks": True, "ball_fill": True, "ball_model": None,
-                     "dead_model": "models/dead_v1.joblib", "who_model": "models/who_v1.joblib"},
+                     "dead_model": None,
+                     "who_model": ["models/owner_tcn_full_impff_s0.pt", "models/owner_tcn_full_impff_s1.pt",
+                                   "models/owner_tcn_full_impff_s2.pt"],
+                     "who_bnd_alpha": 0.5,
+                     "alive_model": ["models/alive_asf_full_impff_s0.pt", "models/alive_asf_full_impff_s1.pt",
+                                     "models/alive_asf_full_impff_s2.pt"],
+                     "alive_variant": "hmm", "alive_tag_w": 0.0, "alive_goal_w": 0.0},
          "params": {"dead_who": "max"}}
+# The recipe submitted until 16 Nov (#35-#39), kept for the comparison in final-check.
+FINAL_V1 = {"options": {"use_tags": True, "clean_tracks": True, "ball_fill": True, "ball_model": None,
+                        "dead_model": "models/dead_v1.joblib", "who_model": "models/who_v1.joblib"},
+            "params": {"dead_who": "max"}}
 _PATH_OPTS = ("ball_model", "dead_model", "who_model", "alive_model")
 _ALIVE_DEFAULTS = {"alive_model": None, "alive_variant": "hmm", "alive_tag_w": 0.0, "alive_goal_w": 0.0}
+_WHO_BND_ALPHA = 0.5
 
 
 def parse_params(items) -> dict:
@@ -83,14 +100,20 @@ def settings(args, saved: dict | None = None) -> tuple[dict, decode.Params]:
     elif args.final:
         given = [f for f in ("no_tags", "clean_tracks", "ball_fill", "ball_model", "dead_model", "who_model", "params",
                              "alive_model", "alive_tag_w", "alive_goal_w") if getattr(args, f, None)]
+        if getattr(args, "who_bnd_alpha", None) is not None:
+            given.append("who_bnd_alpha")
         if getattr(args, "alive_variant", "hmm") != "hmm":
             given.append("alive_variant")
         if given:
             raise SystemExit(f"--final is the frozen recipe; drop {', '.join('--' + g.replace('_', '-') for g in given)}")
         opts, params = {**FINAL["options"]}, replace(decode.Params(), **FINAL["params"])
     else:
+        who_m = args.who_model
+        if isinstance(who_m, (list, tuple)):
+            who_m = None if not who_m else (who_m[0] if len(who_m) == 1 else list(who_m))
         opts = {"use_tags": not args.no_tags, "clean_tracks": args.clean_tracks, "ball_fill": args.ball_fill,
-                "ball_model": args.ball_model, "dead_model": args.dead_model, "who_model": args.who_model,
+                "ball_model": args.ball_model, "dead_model": args.dead_model, "who_model": who_m,
+                "who_bnd_alpha": (_WHO_BND_ALPHA if getattr(args, "who_bnd_alpha", None) is None else args.who_bnd_alpha),
                 **{k: getattr(args, k, v) for k, v in _ALIVE_DEFAULTS.items()}}
         if opts["alive_model"] and opts["dead_model"]:
             raise SystemExit("--alive-model replaces --dead-model: give one of them")
@@ -132,8 +155,8 @@ def fill_ball(trk: atd.Tracking, spec, model_path: Path | None = None):
 
 def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tracks: bool = False,
         ball_fill: bool = False, ball_model: Path | None = None, dead_model: Path | None = None,
-        who_model: Path | None = None, alive_model=None, alive_variant: str = "hmm",
-        alive_tag_w: float = 0.0, alive_goal_w: float = 0.0) -> dict:
+        who_model=None, alive_model=None, alive_variant: str = "hmm",
+        alive_tag_w: float = 0.0, alive_goal_w: float = 0.0, who_bnd_alpha: float = _WHO_BND_ALPHA) -> dict:
     t0 = time.time()
     trk = atd.load(spec)
     clean_report = None
@@ -154,7 +177,7 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
         from .alive import predict as apredict
         alive_files = [_model_file(p) for p in apredict.alive_paths(alive_model)]
         p_dead, p_bnd, rr = apredict.p_dead(alive_files, trk.players, trk.team_of_slot, tracked_ball,
-                                            spec.fps, spec.pitch, spec.halves, device="cpu")
+                                            spec.fps, spec.pitch, spec.halves, device="cpu", float64=True)
     elif alive_on:
         from .alive import predict as apredict
         rr = apredict.rules_only(trk.players, trk.team_of_slot, tracked_ball, spec.fps, spec.pitch, spec.halves)
@@ -162,17 +185,26 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
         from . import dead
         p_dead = dead.predict(dead.load_model(_model_file(dead_model)), trk.players, trk.team_of_slot, spec.fps, spec.pitch,
                               spec.halves)
-    p_home = None
+    p_home = pb_who = sw_t = None
     if who_model:                     # reads the ball as the decoder gets it (filled when --ball-fill)
-        from . import who
-        p_home = who.predict(who.load_model(_model_file(who_model)), trk.players, trk.team_of_slot, trk.ball, spec.fps,
-                             spec.pitch, spec.halves)
+        from .alive import predict as apredict
+        who_files = [_model_file(p) for p in apredict.alive_paths(who_model)]
+        if len(who_files) == 1 and apredict.is_who_joblib(who_files[0]):           # mqf.who (who_v1)
+            from . import who
+            p_home = who.predict(who.load_model(who_files[0]), trk.players, trk.team_of_slot, trk.ball, spec.fps,
+                                 spec.pitch, spec.halves)
+        else:                                                                       # mqf.owner model(s), e.g. the TCNs
+            p_home, pb_who = apredict.owner_p_home(who_files, trk.players, trk.team_of_slot, trk.ball, filled, spec.fps,
+                                                   spec.pitch, spec.halves, device="cpu", float64=True)
+            if pb_who is not None and who_bnd_alpha > 0:
+                from .owner import combine as ocombine
+                sw_t = ocombine.switch_costs(pb_who, params.switch_cost, who_bnd_alpha)
     feat = features.build(trk, spec.pitch, spec.fps, ball_filled=filled, p_dead=p_dead, p_home=p_home)
     tags = None
     if use_tags and spec.smart_tagging and Path(spec.smart_tagging).exists():
         tags = smart_tagging.evidence(spec.smart_tagging, spec.atd_meta, spec.n_frames, spec.fps)
     alive_report = None
-    if alive_on:                      # the mqf.alive decoder (its "hmm" variant = decode.decode, bit for bit)
+    if alive_on or sw_t is not None:  # the mqf.alive decoder (its "hmm" variant = decode.decode, bit for bit)
         from .alive import combine as acombine
         variant, tb = alive_variant, None
         if alive_tag_w > 0 or alive_goal_w > 0:
@@ -185,7 +217,7 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
         if p_dead is None and "tags" in variant.split("+"):
             raise SystemExit("the Smart Tagging dead prior needs a learned P(dead) (--alive-model or --dead-model)")
         labels = acombine.decode_variant(variant, feat, p_dead, spec.halves, spec.n_frames, spec.fps, params, rr,
-                                         p_bnd, tb, max(alive_tag_w, 1e-9) if tb is not None else 0.0, None, tags)
+                                         p_bnd, tb, max(alive_tag_w, 1e-9) if tb is not None else 0.0, sw_t, tags)
         if labels is None:
             raise SystemExit(f"--alive-variant {alive_variant}: needs a boundary (a tcn / asf --alive-model)")
         alive_report = {**(alive_report or {}), "variant": variant,
@@ -204,7 +236,8 @@ def run(spec, params: decode.Params, out: Path, use_tags: bool = True, clean_tra
               "options": {"use_tags": use_tags, "clean_tracks": clean_tracks, "ball_fill": ball_fill,
                           "ball_model": Path(ball_model).as_posix() if ball_model else None,
                           "dead_model": Path(dead_model).as_posix() if dead_model else None,
-                          "who_model": Path(who_model).as_posix() if who_model else None,
+                          "who_model": _alive_opt(who_model),
+                          **({"who_bnd_alpha": who_bnd_alpha} if pb_who is not None else {}),
                           **({"alive_model": _alive_opt(alive_model),
                               "alive_variant": alive_variant, "alive_tag_w": alive_tag_w, "alive_goal_w": alive_goal_w}
                              if alive_on else {})},
@@ -223,7 +256,12 @@ def main():
     ap.add_argument("--ball-fill", action="store_true", help="fill the missing ball (mqf.ball.impute.FROZEN; torch, CPU)")
     ap.add_argument("--ball-model", type=Path, default=None, help="override the frozen ball model file")
     ap.add_argument("--dead-model", type=Path, default=None, help="learned P(dead) (mqf.dead), e.g. models/dead_v1.joblib")
-    ap.add_argument("--who-model", type=Path, default=None, help="learned P(home | alive) (mqf.who), e.g. models/who_v1.joblib")
+    ap.add_argument("--who-model", nargs="+", type=Path, default=None,
+                    help="learned P(home | alive): a mqf.who model (models/who_v1.joblib) or mqf.owner model(s), several = "
+                         "their mean, e.g. models/owner_tcn_full_impff_s0.pt models/owner_tcn_full_impff_s1.pt "
+                         "models/owner_tcn_full_impff_s2.pt")
+    ap.add_argument("--who-bnd-alpha", type=float, default=None,
+                    help=f"H <-> A switch-cost alpha of an owner model's boundary (default {_WHO_BND_ALPHA}, as #40)")
     ap.add_argument("--params", nargs="*", default=[], metavar="KEY=VALUE", help="decoder overrides, e.g. dead_who=max")
     ap.add_argument("--alive-model", nargs="+", type=Path, default=None,
                     help="learned P(dead) of mqf.alive (replaces --dead-model); several = their mean, e.g. "

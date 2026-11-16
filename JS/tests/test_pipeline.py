@@ -124,7 +124,9 @@ def test_settings_final_and_flags():
     opts, params = make_submission.settings(_args(final=True))
     assert params.dead_who == "max" and params.switch_cost == decode.Params().switch_cost
     assert opts["clean_tracks"] and opts["ball_fill"] and opts["use_tags"]
-    assert opts["who_model"] == Path("models/who_v1.joblib") and opts["dead_model"] == Path("models/dead_v1.joblib")
+    assert opts["who_model"] == [f"models/owner_tcn_full_impff_s{k}.pt" for k in range(3)] and opts["dead_model"] is None
+    assert opts["alive_model"] == [f"models/alive_asf_full_impff_s{k}.pt" for k in range(3)]
+    assert opts["who_bnd_alpha"] == 0.5 and opts["alive_variant"] == "hmm" and opts["alive_tag_w"] == 0.0
     with pytest.raises(SystemExit):                      # the recipe is frozen: no mixing with option flags
         make_submission.settings(_args(final=True, clean_tracks=True))
     with pytest.raises(SystemExit):
@@ -156,14 +158,17 @@ def test_reproduce_reuses_saved_params(syn_spec, tmp_path):
 
 
 def test_final_recipe_runs_and_is_deterministic(official, tmp_path):
-    """FINAL end to end (models, ball fill, cleaner, tags) on a short synthetic match, twice, byte-identical."""
+    """FINAL end to end (models, ball fill, cleaner, tags) on a short synthetic match, twice, byte-identical.
+    Skips until the alive asf models are committed (they are trained on the team's machine)."""
     import json
     import pytest
     from mqf.config import ROOT
     pytest.importorskip("torch")
     pytest.importorskip("sklearn")
-    if not all((ROOT / m).is_file() for m in ("models/dead_v1.joblib", "models/who_v1.joblib", "models/ball_B_off_v5.pt")):
-        pytest.skip("submitted models not in models/")
+    fin = make_submission.FINAL["options"]
+    needed = [*fin["who_model"], *fin["alive_model"], "models/ball_B_off_v5.pt"]
+    if not all((ROOT / m).is_file() for m in needed):
+        pytest.skip(f"submitted models not in models/: {[m for m in needed if not (ROOT / m).is_file()]}")
     spec = synthetic.generate(tmp_path / "short", n_frames=9_000, halves=((1, 300, 4_199), (2, 4_700, 8_699)))
     opts, params = make_submission.settings(_args(final=True))
     a, b = tmp_path / "a.csv", tmp_path / "b.csv"
@@ -171,6 +176,7 @@ def test_final_recipe_runs_and_is_deterministic(official, tmp_path):
     make_submission.run(spec, params, b, **opts)
     assert a.read_bytes() == b.read_bytes()
     saved = json.loads(a.with_suffix(".json").read_text())
-    assert saved["options"]["who_model"] == "models/who_v1.joblib"          # recorded as given, portable
+    assert saved["options"]["who_model"] == fin["who_model"]                 # recorded as given, portable
+    assert saved["options"]["alive_model"] == fin["alive_model"] and saved["options"]["who_bnd_alpha"] == 0.5
     assert saved["params"]["dead_who"] == "max" and rep["used_tags"]
     assert make_submission.settings(_args(), saved) == (opts, params)

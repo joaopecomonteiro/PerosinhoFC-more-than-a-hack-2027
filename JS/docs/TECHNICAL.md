@@ -164,7 +164,8 @@ scored on the 11 validation games with the official metric under three ball-loss
 on exactly the dead frames / on most stoppages with jittered edges / at random), because how much BAR-ATH's
 missing ball overlaps its stoppages is unknown; a change is kept only if it passes in all of them
 (`python -m mqf.alive.suite`). `make_submission --alive-model … --alive-variant …` uses it; its `hmm` variant is
-the production decoder bit for bit, and `FINAL` is unchanged until the harness says otherwise.
+the production decoder bit for bit. Result (#42): the ASFormer-lite ensemble +0.030 … +0.049 spellF1 over
+dead_v1 in every condition and ball mode; it is the dead-ball layer of `FINAL` from 16 Nov (#43).
 
 **Who has the ball (`mqf/who.py`, in validation).** The ground truth is ownership: the last team in
 control keeps the ball while it flies, bounces or is contested. v0's "team of the nearest player
@@ -256,9 +257,15 @@ python tasks.py reproduce --team Perosinho_FC   # regenerate into cache/reproduc
 The submitted recipe is `FINAL` in `mqf/make_submission.py`, one place, and every flag it sets is in the run
 report (`results/<team>.json`, aggregates only): tracklet cleaner (`mqf/tracks.py`) → frozen ball fill
 (`models/ball_B_off_v5.pt`, CPU, float64, filled positions rounded to 1 cm so last-bit differences between
-machines cannot change a label) → learned P(dead) (`models/dead_v1.joblib`) and P(home | alive)
-(`models/who_v1.joblib`) → Smart Tagging votes → 3-state HMM, Viterbi per half, decoder `Params()` with
-`dead_who="max"` (as validated, EXPERIMENTS #34–#39). The three model files are committed in `models/`.
+machines cannot change a label) → learned P(dead): the mqf.alive ASFormer-lite ensemble
+(`models/alive_asf_full_impff_s0/1/2.pt`, mean, EXPERIMENTS #42) → learned P(home | alive): the owner TCN
+ensemble (`models/owner_tcn_full_impff_s0/1/2.pt`, mean, its H ↔ A boundary lowering the switch cost with
+α 0.5, #40) → Smart Tagging votes → 3-state HMM, Viterbi per half, decoder `Params()` with `dead_who="max"`
+(#34–#39). The torch models run on the CPU in float64 with one thread and their outputs are rounded to 1e-4,
+for the same reason as the ball fill. The model files are committed in `models/`. Until 16 Nov the recipe
+was `FINAL_V1` (dead_v1 + who_v1); `python tasks.py final-harness` scores both on the validation games and
+`python tasks.py final-check` builds, validates, reproduces and compares the new file before it is submitted
+(EXPERIMENTS #43).
 From a fresh clone with only the submitted file: copy it to `results/Perosinho_FC.csv` and run
 `python tasks.py reproduce --team Perosinho_FC` — with no run report next to it, it rebuilds with `FINAL`.
 Python 3.13, deterministic.

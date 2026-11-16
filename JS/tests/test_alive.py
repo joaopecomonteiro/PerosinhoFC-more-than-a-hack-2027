@@ -361,3 +361,64 @@ def test_predict_ensemble_matches_experiment_mean(tiny):
     b = AliveModel.load(tiny["stack"]).predict(X, g.halves, len(X), g.fps)[0]
     assert np.array_equal(p, np.round(np.mean(np.stack([a, b]), axis=0), 4), equal_nan=True) and pb is None
     assert rr is not None and rr["dead"].shape == p.shape
+
+
+def test_final_style_owner_tcn_plus_alive_ensemble(tmp_path, tiny, official):
+    """The new FINAL's code path (owner TCN ensemble + its boundary, an alive torch ensemble, float64 CPU,
+    ball fill, cleaner, tags) on a short synthetic match: twice byte-identical, and again from the saved
+    report (what --reproduce does). The real asf files live on the team's machine; tiny ones stand in."""
+    import argparse
+    pytest.importorskip("torch")
+    from mqf import make_submission
+    from mqf.config import ROOT
+    fin = make_submission.FINAL["options"]
+    if not all((ROOT / m).is_file() for m in [*fin["who_model"], "models/ball_B_off_v5.pt"]):
+        pytest.skip("owner TCN / ball model not in models/")
+    if "asf" not in tiny:
+        pytest.skip("torch models not trained")
+    spec = synthetic.generate(tmp_path / "short", n_frames=9_000, halves=((1, 300, 4_199), (2, 4_700, 8_699)))
+    opts, params = make_submission.settings(argparse.Namespace(final=True, no_tags=False, clean_tracks=False,
+                                                               ball_fill=False, ball_model=None, dead_model=None,
+                                                               who_model=None, params=[]))
+    opts = {**opts, "alive_model": [str(tiny["asf"]), str(tiny["tcn"])]}
+    a, b = tmp_path / "a.csv", tmp_path / "b.csv"
+    rep = make_submission.run(spec, params, a, **opts)
+    make_submission.run(spec, params, b, **opts)
+    assert a.read_bytes() == b.read_bytes()
+    assert rep["used_tags"] and rep["options"]["who_bnd_alpha"] == 0.5 and len(rep["options"]["who_model"]) == 3
+    saved_opts, saved_params = make_submission.settings(argparse.Namespace(final=False), rep)
+    c = tmp_path / "c.csv"
+    make_submission.run(spec, saved_params, c, **saved_opts)
+    assert c.read_bytes() == a.read_bytes()
+    v1 = tmp_path / "v1.csv"                                                  # the old recipe still runs
+    o1 = {**make_submission.FINAL_V1["options"]}
+    make_submission.run(spec, replace_params(make_submission.FINAL_V1["params"]), v1, **o1)
+    assert v1.read_bytes() != a.read_bytes()
+
+
+def replace_params(over):
+    from dataclasses import replace
+    return replace(decode.Params(), **over)
+
+
+def test_final_check_quick(tmp_path, monkeypatch, tiny, official):
+    """The old-vs-new FINAL harness table runs end to end (tiny alive models stand in for the asf files)."""
+    pytest.importorskip("torch")
+    from mqf import make_submission
+    from mqf.alive import experiment, final_check
+    from mqf.config import ROOT
+    if not all((ROOT / m).is_file() for m in make_submission.FINAL["options"]["who_model"]):
+        pytest.skip("owner TCN not in models/")
+    if "asf" not in tiny:
+        pytest.skip("torch models not trained")
+    _bundles(tmp_path, monkeypatch, {"val": ["METRICA-V1"]})
+    fin = {**make_submission.FINAL, "options": {**make_submission.FINAL["options"],
+                                                "alive_model": [str(tiny["asf"]), str(tiny["tcn"])]}}
+    monkeypatch.setattr(make_submission, "FINAL", fin)
+    for mod in (experiment, final_check):
+        monkeypatch.setattr(mod, "HARNESS_DIR", tmp_path)
+    monkeypatch.setattr(experiment, "EVIDENCE_CACHE", tmp_path / "ev")
+    assert final_check.main(["--quick", "--no-ball-fill", "--device", "cpu", "--tag", "fc"]) == 0
+    text = (tmp_path / "final_check_fc.md").read_text(encoding="utf-8")
+    assert "new − old (spellF1)" in text and "who_v1 × dead_v1" in text and "tcn × asf" in text
+    assert "PASS" in text or "FAIL" in text
