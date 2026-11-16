@@ -72,7 +72,7 @@ python -m mqf.deadball.run --tag v8 --prior 0.5         # FROZEN model on our ma
 python -m mqf.deadball.run --tag joao_v1                # João's dead_v1 in his HMM, for comparison
 python -m mqf.viewer --deadball                         # gray where the ball is dead; lanes = results/deadball/*.csv
 python -m mqf.deadball.shift --tag v7                   # our inputs vs other games (aggregates; to reports/)
-python -m mqf.deadball.inspect --csv --all-inputs --tag v8   # TEAM'S OWN TERMINAL: public-window stoppages
+python -m mqf.deadball.inspect --csv --all-inputs --tag v8 --prior 0.5   # TEAM'S OWN TERMINAL: public-window stoppages
                                                         # (+5 s context) -> reports/deadball/*.csv, never into an AI
 ```
 - `features.py`, all built by `build()` (older models read only their own columns): João's player
@@ -104,7 +104,11 @@ python -m mqf.deadball.inspect --csv --all-inputs --tag v8   # TEAM'S OWN TERMIN
 ## Models and what we know (details: EXPERIMENTS #34–43)
 **FROZEN dead-ball model: v8 with decoder prior 0.5** — `python -m mqf.deadball.run --tag v8 --prior 0.5`
 (-> `results/deadball/v8_prior0.5.csv`). Chosen on other games (tied best stopF1, fewest false stoppages);
-the public window agrees. The team's `--final` on `main` still uses João's `dead_v1`: handing v8 over is next.
+the public window agrees. The team's `--final` on `main` still uses João's `dead_v1`. Handover written for João and
+Carlos (2026-11-16): a Claude Docs doc, "Dead-ball handover: v8 for --final"
+(https://claude.ai/artifact/R2mmQ4Ef2WWhBLVZ217iML; private until shared from its Share menu) -- the swap, how the
+model works, what made it work and why, results, how to plug it into `JS/`, open points. Next: they swap it into
+`--final` and measure spellF1 on their harness; only that shows the effect on the ranking metric.
 
 | model | what changed | pff stopF1 / dead precision / keeper false alarm | public 5 min (4 GT stoppages, 58.8 s dead): found / missed / false |
 |---|---|---|---|
