@@ -67,6 +67,14 @@ def games(condition: str, seeds, stoppage_loss: float):
             for d, seed in itertools.product(bundle.find(source, splits.games("val", sources=[source])), seeds):
                 spec, trk, gt = load(d, noise_cfg=replace(parse_noise([]), seed=seed))
                 yield source, spec, trk, gt, load(d)[1].ball      # ATD noise only: the ball is NOT removed in stoppages
+    elif condition == "carried":
+        for source in ("idsse", "metrica"):
+            for d, seed in itertools.product(bundle.find(source, splits.games("val", sources=[source])), seeds):
+                spec, trk, gt = load(d, noise_cfg=replace(parse_noise([]), seed=seed))
+                clean = load(d)[1].ball
+                rng = np.random.default_rng([seed, 79, zlib.crc32(spec.name.encode())])
+                b = model.carried_ball(trk.ball, trk.players, gt, spec.fps, rng, p_carry=0.7)
+                yield source, spec, model.with_ball(trk, b), gt, clean
     elif condition == "drift":
         for source in ("idsse", "metrica"):
             for d, seed in itertools.product(bundle.find(source, splits.games("val", sources=[source])), seeds):
@@ -224,7 +232,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--model", nargs="*", default=[str(MODELS_DIR / "deadball_v1.joblib")],
                     help="one or more models, compared side by side (detector names get the model's tag)")
-    ap.add_argument("--conditions", nargs="*", default=["pff", "noisy"], choices=["pff", "noisy", "drift", "kept"])
+    ap.add_argument("--conditions", nargs="*", default=["pff", "noisy"], choices=["pff", "noisy", "drift", "kept", "carried"])
     ap.add_argument("--seeds", nargs="*", type=int, default=[0, 1])
     ap.add_argument("--stoppage-loss", type=float, default=0.8)
     ap.add_argument("--no-reference", action="store_true", help="skip João's players-only model")

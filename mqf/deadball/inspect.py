@@ -2,8 +2,14 @@
 
     python -m mqf.deadball.inspect --half 1 --from 1:06 --to 1:13       # exact range, a row every 0.2 s
     python -m mqf.deadball.inspect --half 1 --at 5:17                   # +/- 15 s around a moment
-    python -m mqf.deadball.inspect --csv --tag v3                       # the public window, every frame -> reports/deadball/
-    python -m mqf.deadball.inspect --csv --all-inputs --tag v3          # ... with all model inputs as columns
+    python -m mqf.deadball.inspect --csv --tag v4                       # stoppages of the public window (true and called)
+                                                                        #   + 5 s around each, every frame -> reports/deadball/
+    python -m mqf.deadball.inspect --csv --scope match --tag v4         # every stoppage the model calls in the match
+    python -m mqf.deadball.inspect --csv --context 10 --all-inputs --tag v4   # more context, all model inputs
+    python -m mqf.deadball.inspect --csv --all-frames --tag v4          # the old way: every frame of the public window
+CSV extra columns: seg (stoppage number), seg_kind (truth+model = found, truth only = missed, model only =
+called where the truth says play -- or outside the public window, no truth there), seg_start, t_rel_s
+(seconds since that stoppage started; negative = the context before it).
 
 The clock is the viewer's ("1st half 05:17" = 5 min 17 s after the half's first graded frame).
 This prints real values of the competition match (positions, speeds, probabilities): never paste
@@ -53,6 +59,13 @@ def main(argv=None) -> int:
                     help="write the table to reports/deadball/ instead of printing it (default range: the public "
                          "window, 1st half 0:00-5:00; every frame unless --step is given)")
     ap.add_argument("--all-inputs", action="store_true", help="with --csv: add every model input as a column")
+    ap.add_argument("--context", type=float, default=5.0,
+                    help="with --csv: seconds kept before and after each stoppage")
+    ap.add_argument("--scope", choices=["public", "match"], default="public",
+                    help="with --csv: stoppages in the public window (truth + model) or in the whole match "
+                         "(model only outside the public window)")
+    ap.add_argument("--all-frames", action="store_true",
+                    help="with --csv: every frame of the range instead of only the stoppages")
     a = ap.parse_args(argv)
     if a.csv and not (a.t_from or a.at):
         a.half, a.t_from, a.t_to = 1, "0:00", "5:00"
@@ -91,23 +104,50 @@ def main(argv=None) -> int:
     dead = decoder.decode(p, spec.halves, fps, tables, w=a.w, prior=m["meta"]["prior"])
     X = features.build(trk.players, trk.team_of_slot, trk.ball, fps, spec.pitch, spec.halves)
 
-    still = (X["b_still"].to_numpy() > 0).astype(np.int32)
-    still_run = np.zeros(len(still))
-    run = 0
-    for i in range(lo - int(60 * fps) if lo > int(60 * fps) else 0, hi + 1):
-        run = run + 1 if still[i] else 0
-        still_run[i] = run / fps
+    still_run = features._run_s(X["b_still"].to_numpy() > 0, fps)
     bsp = X["b_speed"].to_numpy()
     k4 = max(1, int(round(0.4 * fps)))
     step = max(1, int(round(a.step * fps)))
+
+    def clock(f: int) -> str:
+        for h, s0, e0 in spec.halves:
+            if s0 <= f <= e0:
+                t = (f - s0) / fps
+                return f"{h}H {int(t // 60):02d}:{t % 60:05.2f}"
+        return "-"
+
+    seg_of = {}                                   # frame -> (seg, kind, start_frame)
+    if a.csv and not a.all_frames:                # only stoppages (true and called) + context around each
+        if a.scope == "match":
+            ranges = [(s0, e0) for _, s0, e0 in spec.halves]
+        else:
+            ranges = [(lo, hi)]
+        runs = lambda mask: [(int(s), int(e)) for s, e in zip(np.flatnonzero(np.diff(np.r_[0, mask.astype(np.int8), 0]) == 1),
+                                                              np.flatnonzero(np.diff(np.r_[0, mask.astype(np.int8), 0]) == -1))]
+        frames, segs = [], []
+        ctx = int(round(a.context * fps))
+        for r0, r1 in ranges:
+            inside = np.zeros(spec.n_frames, dtype=bool)
+            inside[r0:r1 + 1] = True
+            t_mask, d_mask = inside & (truth == "D"), inside & dead
+            for s, e in runs(t_mask | d_mask):    # merged stoppages: true, called, or both
+                has_t, has_d = t_mask[s:e].any(), d_mask[s:e].any()
+                kind = "truth+model" if has_t and has_d else ("truth only" if has_t else "model only")
+                segs.append((s, e, kind))
+        for k, (s, e, kind) in enumerate(segs, start=1):
+            for f in range(max(0, s - ctx), min(spec.n_frames, e + ctx), step):
+                if f not in seg_of:
+                    seg_of[f] = (k, kind, s)
+        frames = sorted(seg_of)
+    else:
+        frames = list(range(lo, hi + 1, step))
     rows = []
-    for f in range(lo, hi + 1, step):
-        t = (f - half[0]) / fps
+    for f in frames:
         bx, by = trk.ball[f]
         seen = not np.isnan(bx)
         d = np.linalg.norm(trk.players[f] - trk.ball[f], axis=-1) if seen else np.array([np.nan])
         near = float(np.nanmin(d)) if seen and np.isfinite(d).any() else np.nan
-        row = {"frame": f, "clock": f"{a.half}H {int(t // 60):02d}:{t % 60:05.2f}", "truth": truth[f].strip(),
+        row = {"frame": f, "clock": clock(f), "truth": truth[f].strip(),
                "p_dead": p[f], "p_pl": pp[f], "dead": int(dead[f]), "ball": int(seen),
                "ball_x": bx if seen else np.nan, "ball_y": by if seen else np.nan, "b_speed": bsp[f],
                "b_acc": bsp[f] - bsp[f - k4] if f >= k4 else np.nan, "still_s": still_run[f],
@@ -115,14 +155,21 @@ def main(argv=None) -> int:
                "slow": X["share_slow"][f], "near_m": near,
                "in9m": int(np.nansum(d < 9.15)) if seen else np.nan,      # no ball: unknown, not "nobody near"
                "dspeed1s": X["e_dspeed_1s"][f]}
+        if f in seg_of:
+            k, kind, s0 = seg_of[f]
+            row = {"seg": k, "seg_kind": kind, "seg_start": clock(s0), "t_rel_s": round((f - s0) / fps, 2), **row}
         if a.csv and a.all_inputs:
             row.update({f"x_{c}": X[c][f] for c in m["columns"]})
         rows.append(row)
     if a.csv:
         import pandas as pd
         from ..config import REPORTS_DIR
-        out = REPORTS_DIR / "deadball" / (f"inspect_{a.tag}_{a.half}H_{a.t_from or a.at}_{a.t_to or ''}"
-                                          .replace(":", "m").rstrip("_") + ".csv")
+        if seg_of:
+            name = f"inspect_{a.tag}_stoppages_{a.scope}_ctx{a.context:g}s.csv"
+        else:
+            name = (f"inspect_{a.tag}_{a.half}H_{a.t_from or a.at}_{a.t_to or ''}".replace(":", "m").rstrip("_")
+                    + ".csv")
+        out = REPORTS_DIR / "deadball" / name
         out.parent.mkdir(parents=True, exist_ok=True)
         pd.DataFrame(rows).to_csv(out, index=False, float_format="%.4f")
         print(f"wrote {out}  ({len(rows)} rows) -- LOCAL ONLY: open it yourself, never paste it into an AI chat")

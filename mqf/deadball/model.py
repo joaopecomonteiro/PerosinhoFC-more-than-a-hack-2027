@@ -72,12 +72,79 @@ def drift_ball_loss(b: np.ndarray, gt: np.ndarray, fps: float, rng, p_whole: flo
     return out
 
 
+def carried_ball(b: np.ndarray, players: np.ndarray, gt: np.ndarray, fps: float, rng, p_carry: float,
+                 roll_s=(1.0, 4.0), put_s=(0.5, 2.0), pass_p: float = 0.4) -> np.ndarray:
+    """v5. A stoppage whose ball stays VISIBLE and MOVES like play: what a tracker shows while players
+    fetch, carry and return the ball (football behaviour, not fitted to any match).
+
+    For each true stoppage, with probability p_carry:
+      roll    the ball keeps its pre-stoppage velocity, slowing down, for roll_s seconds
+      carry   then it travels with the nearest player (0.3-0.8 m from him, his pace), and with
+              probability pass_p it is passed to the next-nearest player (straight line, ~8 m/s)
+      put     put_s seconds before the restart it moves to where play restarts and lies still
+    Other stoppages keep the ball as it is. Every number is an assumption, randomised in training.
+    """
+    out = b.astype(np.float64).copy()
+    P = players.astype(np.float64)
+    n = len(gt)
+    d = np.diff(np.r_[0, (gt == "D").astype(np.int8), 0])
+    k = max(1, int(round(0.2 * fps)))
+    for s, e in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1)):
+        if e - s < int(3 * fps) or s < k + 1 or rng.random() >= p_carry:
+            continue
+        p0 = out[s - 1]
+        if np.isnan(p0).any():
+            continue
+        v0 = (out[s - 1] - out[s - 1 - k]) * fps / k if not np.isnan(out[s - 1 - k]).any() else np.zeros(2)
+        n_roll = min(e - s, int(rng.uniform(*roll_s) * fps))
+        t = np.arange(1, n_roll + 1) / fps
+        tau = 1.5                                         # s: a rolling ball slowing down
+        out[s:s + n_roll] = p0 + v0[None, :] * (tau * (1 - np.exp(-t / tau)))[:, None]
+        n_put = min(e - (s + n_roll), int(rng.uniform(*put_s) * fps))
+        c0, c1 = s + n_roll, e - n_put
+        if c1 > c0:
+            pos = out[c0 - 1].copy()
+            dist = np.linalg.norm(P[c0] - pos, axis=-1)
+            order = np.argsort(np.where(np.isnan(dist), np.inf, dist))
+            carrier = order[0]
+            offset = rng.uniform(0.3, 0.8) * np.array([np.cos(a := rng.uniform(0, 2 * np.pi)), np.sin(a)])
+            t_pass = c0 + int(rng.uniform(0.3, 0.7) * (c1 - c0)) if (rng.random() < pass_p and len(order) > 1) else None
+            f = c0
+            while f < c1:
+                if t_pass is not None and f == t_pass:     # a pass back to the next-nearest player
+                    dd = np.linalg.norm(P[f] - pos, axis=-1)
+                    oo = np.argsort(np.where(np.isnan(dd), np.inf, dd))
+                    target = oo[1] if oo[0] == carrier else oo[0]
+                    tgt = P[f, target]
+                    if not np.isnan(tgt).any():
+                        steps = max(1, int(np.linalg.norm(tgt - pos) / 8.0 * fps))
+                        for j in range(1, steps + 1):
+                            if f >= c1:
+                                break
+                            out[f] = pos + (tgt - pos) * j / steps
+                            f += 1
+                        pos, carrier = out[f - 1].copy(), target
+                        continue
+                q = P[f, carrier]
+                if not np.isnan(q).any():
+                    pos = q + offset
+                out[f] = pos
+                f += 1
+        if n_put > 0:
+            start = out[e - n_put - 1] if e - n_put - 1 >= s else p0
+            end = b[e] if e < n and not np.isnan(b[e]).any() else start
+            m_steps = max(1, int(0.4 * n_put))
+            for j in range(n_put):
+                out[e - n_put + j] = start + (end - start) * min(1.0, (j + 1) / m_steps)
+    return out
+
+
 def with_ball(trk, b):
     from .. import atd
     return atd.Tracking(trk.players, trk.player_speed, b.astype(np.float32), trk.team_of_slot)
 
 
-def training_games(seed: int = 0, drift: bool = False, kept_share: float = 0.0):
+def training_games(seed: int = 0, drift: bool = False, kept_share: float = 0.0, carried_share: float = 0.0):
     """(source, copy, spec, tracking, gt) for every training game copy. drift: drift_ball_loss (v2)."""
     from ..external import bundle, splits
     from ..external.evaluate import load, parse_noise
@@ -89,8 +156,11 @@ def training_games(seed: int = 0, drift: bool = False, kept_share: float = 0.0):
                     spec, trk, gt = load(d, noise_cfg=replace(parse_noise([]), seed=1000 + 100 * seed + i))
                 else:
                     spec, trk, gt = load(d, players_drop=True, seed=1000 + i)
-                if drift and rng.random() < kept_share:  # v4: the ball stays visible through the stoppages
+                r = rng.random()
+                if drift and r < kept_share:             # v4: the ball stays visible through the stoppages
                     b = trk.ball.astype(np.float64)
+                elif drift and r < kept_share + carried_share:   # v5: visible and moving like play
+                    b = carried_ball(trk.ball, trk.players, gt, spec.fps, rng, p_carry=float(rng.uniform(0.4, 0.9)))
                 elif drift:                              # v2: gaps that do not line up with stoppages
                     b = drift_ball_loss(trk.ball.astype(np.float64), gt, spec.fps, rng,
                                         p_whole=float(rng.uniform(0.3, 1.0)), lead_p=float(rng.uniform(0.2, 0.8)),
@@ -115,13 +185,14 @@ def run_lengths(gt: np.ndarray, halves, fps: float) -> dict:
     return out
 
 
-def train(tag: str, iters: int = 400, seed: int = 0, drift: bool = False, kept_share: float = 0.0) -> dict:
+def train(tag: str, iters: int = 400, seed: int = 0, drift: bool = False, kept_share: float = 0.0,
+          carried_share: float = 0.0) -> dict:
     from sklearn.ensemble import HistGradientBoostingClassifier
     import joblib
     t0 = time.time()
     Xs, ys, srcs, names = [], [], [], []
     lengths = {"dead": [], "alive": []}
-    for source, copy, spec, trk, gt in training_games(seed, drift, kept_share):
+    for source, copy, spec, trk, gt in training_games(seed, drift, kept_share, carried_share):
         X = features.build(trk.players, trk.team_of_slot, trk.ball, spec.fps, spec.pitch, spec.halves)
         k = max(1, int(round(spec.fps / SAMPLE_HZ)))
         idx = np.concatenate([np.arange(a, b + 1, k) for _, a, b in spec.halves])
@@ -145,7 +216,7 @@ def train(tag: str, iters: int = 400, seed: int = 0, drift: bool = False, kept_s
                                            l2_regularization=1.0, early_stopping=False, random_state=seed)
     model.fit(X.to_numpy(), y, sample_weight=w)
     meta = {"tag": tag, "train": names, "frames": int(len(X)), "inputs": int(X.shape[1]),
-            "prior": float(np.average(y, weights=w)), "iters": iters, "seed": seed, "drift": drift, "kept_share": kept_share,
+            "prior": float(np.average(y, weights=w)), "iters": iters, "seed": seed, "drift": drift, "kept_share": kept_share, "carried_share": carried_share,
             "n_stoppages": len(lengths["dead"]), "n_play": len(lengths["alive"])}
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     path = MODELS_DIR / f"deadball_{tag}.joblib"
@@ -184,8 +255,10 @@ def main(argv=None) -> int:
     t.add_argument("--drift", action="store_true", help="ball loss that does not line up with stoppages")
     t.add_argument("--kept-share", type=float, default=0.0,
                    help="with --drift: share of IDSSE / Metrica copies whose ball stays visible in stoppages")
+    t.add_argument("--carried-share", type=float, default=0.0,
+                   help="with --drift: share of IDSSE / Metrica copies whose stoppage ball is carried like play (v5)")
     a = ap.parse_args(argv)
-    train(a.tag, a.iters, a.seed, a.drift, a.kept_share)
+    train(a.tag, a.iters, a.seed, a.drift, a.kept_share, a.carried_share)
     return 0
 
 

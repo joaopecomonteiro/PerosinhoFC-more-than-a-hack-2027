@@ -246,3 +246,27 @@ def test_combine_lets_a_steady_players_signal_win():
     assert evaluate.combine(p_ball, p_pl, 0.0, FPS)[FPS * 10] == pytest.approx(0.2, abs=1e-3)
     blip = np.full(n, 0.1); blip[FPS * 10:FPS * 10 + 5] = 0.99        # a 0.2 s players blip is averaged away
     assert evaluate.combine(p_ball, blip, 1.0, FPS)[FPS * 10] < 0.2
+
+
+# ------------------------------------------------------------------------------------ v5 simulation
+
+def test_carried_ball_is_visible_follows_a_player_and_ends_at_the_restart():
+    n = FPS * 60
+    gt = np.array(["H"] * (FPS * 20) + ["D"] * (FPS * 20) + ["A"] * (FPS * 20))
+    t = np.arange(n) / FPS
+    b = np.stack([10.0 + 3.0 * t, np.full(n, 30.0)], axis=1)          # play: the ball moves at 3 m/s
+    b[FPS * 40:] = [70.0, 0.0]                                         # the restart: on the touchline
+    players = np.zeros((n, 3, 2))
+    players[:, 0] = np.stack([60.0 + 0.5 * t - 10.0, np.full(n, 25.0)], axis=1)   # walks at 0.5 m/s
+    players[:, 1] = [90.0, 50.0]
+    players[:, 2] = [20.0, 60.0]
+    out = model.carried_ball(b, players, gt, FPS, np.random.default_rng(0), p_carry=1.0, pass_p=0.0)
+    dead = slice(FPS * 20, FPS * 40)
+    assert not np.isnan(out[dead]).any()                               # visible the whole stoppage
+    assert not np.allclose(out[FPS * 25], out[FPS * 30])               # and moving
+    mid = FPS * 30
+    assert np.linalg.norm(out[mid] - players[mid, 0]) < 1.0            # carried by the nearest player
+    assert np.allclose(out[FPS * 40 - 1], [70.0, 0.0])                 # put down where play restarts
+    assert np.allclose(out[:FPS * 20], b[:FPS * 20]) and np.allclose(out[FPS * 40:], b[FPS * 40:])
+    keep = model.carried_ball(b, players, gt, FPS, np.random.default_rng(0), p_carry=0.0)
+    assert np.allclose(keep, b)
