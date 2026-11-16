@@ -55,6 +55,7 @@ def main(argv=None) -> int:
     ap.add_argument("--step", type=float, default=0.2, help="seconds between rows")
     ap.add_argument("--tag", default="v1")
     ap.add_argument("--w", type=float, default=0.2)
+    ap.add_argument("--prior", type=float, default=None, help="decoder prior (default: the model's; frozen v8 = 0.5)")
     ap.add_argument("--csv", action="store_true",
                     help="write the table to reports/deadball/ instead of printing it (default range: the public "
                          "window, 1st half 0:00-5:00; every frame unless --step is given)")
@@ -101,7 +102,8 @@ def main(argv=None) -> int:
     pp = players_model.predict(players_model.load_model(MODELS_DIR / "dead_v1.joblib"), trk.players, trk.team_of_slot,
                                fps, spec.pitch, spec.halves)
     tables = decoder.length_tables(m["lengths"]["alive"]), decoder.length_tables(m["lengths"]["dead"])
-    dead = decoder.decode(p, spec.halves, fps, tables, w=a.w, prior=m["meta"]["prior"])
+    dead = decoder.decode(p, spec.halves, fps, tables, w=a.w,
+                          prior=a.prior if a.prior is not None else m["meta"]["prior"])
     X = features.build(trk.players, trk.team_of_slot, trk.ball, fps, spec.pitch, spec.halves)
     model.add_players_columns(X, m, spec)                 # v6+: the players-only inputs too
 
@@ -166,7 +168,8 @@ def main(argv=None) -> int:
         import pandas as pd
         from ..config import REPORTS_DIR
         if seg_of:
-            name = f"inspect_{a.tag}_stoppages_{a.scope}_ctx{a.context:g}s.csv"
+            pr = f"_prior{a.prior:g}" if a.prior is not None else ""
+            name = f"inspect_{a.tag}{pr}_stoppages_{a.scope}_ctx{a.context:g}s.csv"
         else:
             name = (f"inspect_{a.tag}_{a.half}H_{a.t_from or a.at}_{a.t_to or ''}".replace(":", "m").rstrip("_")
                     + ".csv")
