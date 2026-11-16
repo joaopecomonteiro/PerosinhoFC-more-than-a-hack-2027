@@ -39,8 +39,10 @@ from .config import CACHE_DIR, MODELS_DIR, RESULTS_DIR, ROOT, SYNTHETIC_DIR, com
 # EXPERIMENTS entry, and test it before submitting (python tasks.py final-check, docs/EXPERIMENTS.md #43).
 #   possession: the owner TCN ensemble (3 seeds, IDSSE + Metrica + PFF) with its own H <-> A boundary on the
 #               switch cost, alpha 0.5 (#40: +0.048 / +0.050 / +0.054 vs who_v1)
-#   dead ball:  the ASFormer-lite ensemble of mqf.alive (3 seeds, IDSSE + Metrica + PFF; #42: +0.030 ... +0.049
-#               vs dead_v1), production HMM decoder ("hmm"), no Smart Tagging dead prior
+#   dead ball:  the mean P(dead) of the ASFormer-lite ensemble of mqf.alive (3 seeds, IDSSE + Metrica + PFF, #42)
+#               and Italo's mqf.deadball v8 (#44), in the production HMM ("hmm"), no Smart Tagging dead prior.
+#               final_check (#45): +0.005 ... +0.017 over asf alone under the owner TCN, in every column -- v8
+#               alone scores higher where the ball vanishes in stoppages but loses when it does not
 #   as before:  frozen ball fill, tracklet cleaner, Smart Tagging team votes, dead_who="max" (#34/#35)
 FINAL = {"options": {"use_tags": True, "clean_tracks": True, "ball_fill": True, "ball_model": None,
                      "dead_model": None,
@@ -49,7 +51,8 @@ FINAL = {"options": {"use_tags": True, "clean_tracks": True, "ball_fill": True, 
                      "who_bnd_alpha": 0.5,
                      "alive_model": ["models/alive_asf_full_impff_s0.pt", "models/alive_asf_full_impff_s1.pt",
                                      "models/alive_asf_full_impff_s2.pt"],
-                     "alive_variant": "hmm", "alive_tag_w": 0.0, "alive_goal_w": 0.0},
+                     "alive_variant": "hmm", "alive_tag_w": 0.0, "alive_goal_w": 0.0,
+                     "deadball_model": "models/deadball_v8.joblib", "deadball_decoder": "hmm", "deadball_prior": 0.5},
          "params": {"dead_who": "max"}}
 # The recipe submitted until 16 Nov (#35-#39), kept for the comparison in final-check.
 FINAL_V1 = {"options": {"use_tags": True, "clean_tracks": True, "ball_fill": True, "ball_model": None,

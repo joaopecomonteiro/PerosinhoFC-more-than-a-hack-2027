@@ -267,8 +267,9 @@ python tasks.py reproduce --team Perosinho_FC   # regenerate into cache/reproduc
 The submitted recipe is `FINAL` in `mqf/make_submission.py`, one place, and every flag it sets is in the run
 report (`results/<team>.json`, aggregates only): tracklet cleaner (`mqf/tracks.py`) → frozen ball fill
 (`models/ball_B_off_v5.pt`, CPU, float64, filled positions rounded to 1 cm so last-bit differences between
-machines cannot change a label) → learned P(dead): the mqf.alive ASFormer-lite ensemble
-(`models/alive_asf_full_impff_s0/1/2.pt`, mean, EXPERIMENTS #42) → learned P(home | alive): the owner TCN
+machines cannot change a label) → learned P(dead): the mean of the mqf.alive ASFormer-lite ensemble
+(`models/alive_asf_full_impff_s0/1/2.pt`, #42) and the mqf.deadball v8 model (`models/deadball_v8.joblib`,
+#44; the mean wins over each alone under every ball-loss assumption, #45) → learned P(home | alive): the owner TCN
 ensemble (`models/owner_tcn_full_impff_s0/1/2.pt`, mean, its H ↔ A boundary lowering the switch cost with
 α 0.5, #40) → Smart Tagging votes → 3-state HMM, Viterbi per half, decoder `Params()` with `dead_who="max"`
 (#34–#39). The torch models run on the CPU in float64 with one thread and their outputs are rounded to 1e-4,

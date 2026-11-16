@@ -40,7 +40,21 @@ DEAD = [("dead_v1", "hmm"), ("asf", "hmm"), ("v8", "hmm"), ("v8_hsmm", "hsmm"), 
 DEAD_LABEL = {"dead_v1": "dead_v1", "asf": "asf (mqf.alive, 3 seeds)", "v8": "v8 P(dead) in our HMM",
               "v8_hsmm": "v8 + its semi-Markov decoder (prior 0.5)", "asf_v8": "mean(asf, v8) in our HMM"}
 WHOS = ("who_v1", "tcn")
-OLD, NEW = ("who_v1", "dead_v1", "hmm"), ("tcn", "asf", "hmm")
+OLD = ("who_v1", "dead_v1", "hmm")
+
+
+def new_key() -> tuple:
+    """The (possession, dead ball, variant) row that make_submission.FINAL corresponds to."""
+    from ..make_submission import FINAL
+    o = FINAL["options"]
+    if o.get("deadball_model") and o.get("alive_model"):
+        return ("tcn", "asf_v8", "hmm")
+    if o.get("deadball_model"):
+        return ("tcn", "v8_hsmm", "hsmm") if o.get("deadball_decoder", "hsmm") == "hsmm" else ("tcn", "v8", "hmm")
+    return ("tcn", "asf", "hmm")
+
+
+NEW = new_key()
 
 
 def _sel(df, key):

@@ -127,6 +127,7 @@ def test_settings_final_and_flags():
     assert opts["who_model"] == [f"models/owner_tcn_full_impff_s{k}.pt" for k in range(3)] and opts["dead_model"] is None
     assert opts["alive_model"] == [f"models/alive_asf_full_impff_s{k}.pt" for k in range(3)]
     assert opts["who_bnd_alpha"] == 0.5 and opts["alive_variant"] == "hmm" and opts["alive_tag_w"] == 0.0
+    assert opts["deadball_model"] == Path("models/deadball_v8.joblib") and opts["deadball_decoder"] == "hmm"
     with pytest.raises(SystemExit):                      # the recipe is frozen: no mixing with option flags
         make_submission.settings(_args(final=True, clean_tracks=True))
     with pytest.raises(SystemExit):
@@ -166,7 +167,7 @@ def test_final_recipe_runs_and_is_deterministic(official, tmp_path):
     pytest.importorskip("torch")
     pytest.importorskip("sklearn")
     fin = make_submission.FINAL["options"]
-    needed = [*fin["who_model"], *fin["alive_model"], "models/ball_B_off_v5.pt"]
+    needed = [*fin["who_model"], *fin["alive_model"], fin["deadball_model"], "models/ball_B_off_v5.pt"]
     if not all((ROOT / m).is_file() for m in needed):
         pytest.skip(f"submitted models not in models/: {[m for m in needed if not (ROOT / m).is_file()]}")
     spec = synthetic.generate(tmp_path / "short", n_frames=9_000, halves=((1, 300, 4_199), (2, 4_700, 8_699)))
@@ -178,5 +179,6 @@ def test_final_recipe_runs_and_is_deterministic(official, tmp_path):
     saved = json.loads(a.with_suffix(".json").read_text())
     assert saved["options"]["who_model"] == fin["who_model"]                 # recorded as given, portable
     assert saved["options"]["alive_model"] == fin["alive_model"] and saved["options"]["who_bnd_alpha"] == 0.5
+    assert saved["options"]["deadball_model"] == fin["deadball_model"] and saved["options"]["deadball_decoder"] == "hmm"
     assert saved["params"]["dead_who"] == "max" and rep["used_tags"]
     assert make_submission.settings(_args(), saved) == (opts, params)
