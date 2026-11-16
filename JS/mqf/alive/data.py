@@ -15,7 +15,8 @@ Rows: every 1 / SAMPLE_HZ s inside the halves -- the full_rules table (feats.py)
 TCN / ASFormer read, so one cache serves every model.
 
 Cache: external/cache/alive/<game>_<key>.npz (other games only, gitignored with external/). The key
-hashes the code of dead.py, feats.py, rules.py and this file plus the seed and the rule settings.
+hashes the code of dead.py, feats.py, rules.py, deadball/features.py and this file plus the seed and
+the rule settings.
 """
 from __future__ import annotations
 
@@ -40,8 +41,9 @@ HIDE_SPAN_S = (0.2, 30.0)
 
 def code_hash() -> str:
     from .. import dead
+    from ..deadball import features as dfeat
     h = hashlib.sha1()
-    for mod in (dead, feats, rules):
+    for mod in (dead, feats, rules, dfeat):
         h.update(Path(mod.__file__).read_bytes())
     h.update(Path(__file__).read_bytes())
     return h.hexdigest()[:10]

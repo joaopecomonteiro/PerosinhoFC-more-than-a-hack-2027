@@ -40,7 +40,8 @@ def test_feature_table_sets_and_no_missingness_columns():
     assert list(X.columns[:len(v1)]) == v1 and len(v1) == 36
     sizes = [len(feats.columns_of(s, list(X.columns))) for s in feats.FEATURE_SETS]
     assert sizes == sorted(sizes) and sizes[0] == 36 and len(set(sizes)) == len(sizes)
-    assert not any("seen" in c or "missing" in c for c in X.columns)           # absence is never a feature
+    ours = [c for c in X.columns if not c.startswith("i_")]
+    assert not any("seen" in c or "missing" in c for c in ours)                # absence is never one of OUR inputs
     assert X.loc[3100:3400, "b_out"].isna().all() and X.loc[3100:3400, "b_speed"].isna().all()
     assert X.loc[3100:3400, "p_speed_p95"].notna().all()                        # players unaffected
     sub = feats.features(m["players"], m["team_of_player"], ball, FPS, PITCH, HALVES, "formation")
@@ -448,3 +449,33 @@ def test_decode_masked_respects_the_mask():
         ins[a:b + 1] = True
     assert (lab[mask & ins] == "D").all() and not (lab[~mask & ins] == "D").any()
     assert set(np.unique(lab[~mask & ins])) <= {"H", "A"}
+
+
+def test_full_i8_feature_set():
+    m = _match(4)
+    X = feats.features(m["players"], m["team_of_player"], m["ball"], FPS, PITCH, HALVES)
+    full = feats.columns_of("full", list(X.columns))
+    i8 = feats.columns_of("full_i8", list(X.columns))
+    ic = [c for c in i8 if c.startswith("i_")]
+    assert set(full) < set(i8) and len(ic) > 40 and "i_k_hold" in ic and "i_m3_open_s" in ic
+    assert not set(ic) & {f"i_{c}" for c in feats.v1_columns()}                  # dead_v1's columns not twice
+    assert X.iloc[:500][ic].isna().all().all()                                     # NaN outside the halves
+
+
+def test_i8_check_quick(tmp_path, monkeypatch, official):
+    pytest.importorskip("torch")
+    from mqf import make_submission
+    from mqf.alive import data as adata, experiment, i8_check, suite, train
+    from mqf.config import ROOT
+    fin = make_submission.FINAL["options"]
+    if not all((ROOT / p).is_file() for p in [*fin["who_model"], *fin["alive_model"], fin["deadball_model"]]):
+        pytest.skip("FINAL's model files not in models/")
+    _bundles(tmp_path, monkeypatch, {"train": ["IDSSE-T1", "METRICA-T1", "PFF-T1"], "val": ["METRICA-V1"]})
+    for mod in (i8_check, suite, train, experiment):
+        monkeypatch.setattr(mod, "HARNESS_DIR", tmp_path, raising=False)
+    monkeypatch.setattr(train, "MODELS_DIR", tmp_path)
+    monkeypatch.setattr(experiment, "EVIDENCE_CACHE", tmp_path / "ev")
+    monkeypatch.setattr(adata, "CACHE_DIR", tmp_path / "cache")
+    assert i8_check.main(["--quick", "--no-ball-fill", "--device", "cpu", "--tag", "iq"]) == 0
+    text = (tmp_path / "i8_check_iq.md").read_text(encoding="utf-8")
+    assert "asf on full + i_ (new)" in text and "mean(asf_i8, v8) − FINAL today" in text

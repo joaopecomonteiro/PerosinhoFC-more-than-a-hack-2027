@@ -16,8 +16,13 @@ One table, column groups by prefix; every model picks its set by name (FEATURE_S
              lines, corner mark, goal area, centre spot, speed, still, a restart kick (speed jump from
              < 2 to > 7 m/s, as ELASTIC finds set-piece kicks), clocks since / until out and kick
   full_rules full + r_*: the rule outputs of rules.py
+  full_i8    full + i_*: every input of Italo's mqf.deadball v8 that is not one of dead_v1's columns (keeper
+             holding, "went out" memory closed by a restart, carried ball, edges, stopped state, placed ball,
+             his ball-gap inputs), prefixed i_. Our views make the ball's absence label-independent, so his gap
+             inputs carry no stoppage signal here -- the model can only use what they say beyond absence
 
-The ball's ABSENCE is never a feature (no "seen" flags, no missing-run clocks): whether a missing ball
+The ball's ABSENCE is never one of our features (no "seen" flags, no missing-run clocks; only the i_ group,
+Italo's inputs, carries his ball-gap columns -- and data.py's views neutralise them): whether a missing ball
 means a stoppage depends on the tracking system (DFL keeps it, PFF's broadcast and BAR-ATH's tactical
 camera lose it in stoppages), and the harness's --hide-dead-ball removes it on exactly the dead frames,
 so any missingness cue would read the answer off the condition. data.py also makes the missingness
@@ -46,9 +51,9 @@ CROWD_M = 3.0
 KICK_FROM_MS, KICK_TO_MS = 2.0, 7.0
 OUT_MARGIN_M = 0.5
 
-FEATURE_SETS = ("v1", "players", "formation", "full", "full_rules")
+FEATURE_SETS = ("v1", "players", "formation", "full", "full_rules", "full_i8")
 _PREFIX_OF = {"v1": (), "players": ("p_",), "formation": ("p_", "f_"), "full": ("p_", "f_", "b_"),
-              "full_rules": ("p_", "f_", "b_", "r_")}
+              "full_rules": ("p_", "f_", "b_", "r_"), "full_i8": ("p_", "f_", "b_", "i_")}
 
 
 def _nan(fn, a, axis=1):
@@ -312,9 +317,18 @@ def _half_columns(q: dict, a: int, b: int, fps: float) -> dict:
     return c
 
 
+def italo_columns(players, team, ball, fps, pitch, halves, v1_cols) -> pd.DataFrame:
+    """Italo's mqf.deadball inputs (features.build, the code v8 reads) minus dead_v1's columns, prefixed i_."""
+    from ..deadball import features as dfeat
+    D = dfeat.build(np.asarray(players), np.asarray(team), np.asarray(ball, dtype=np.float64), fps, pitch, halves)
+    D = D[[c for c in D.columns if c not in set(v1_cols)]]
+    return D.add_prefix("i_").reset_index(drop=True)
+
+
 def features(players: np.ndarray, team: np.ndarray, ball: np.ndarray, fps: float, pitch, halves,
              feature_set: str = "full_rules", rule_cfg=None, return_rules: bool = False):
-    """(n, F) DataFrame, NaN outside the halves: dead_v1's columns, then p_ / f_ / b_ (/ r_) columns.
+    """(n, F) DataFrame, NaN outside the halves: dead_v1's columns, then p_ / f_ / b_ (/ r_ / i_) columns.
+    feature_set "full_rules" is the WHOLE table (every group; the cache of data.py and the experiments).
     `ball` must be the TRACKED ball (NaN where missing), never a filled one."""
     from . import rules as rules_mod
     n = len(players)
@@ -329,6 +343,8 @@ def features(players: np.ndarray, team: np.ndarray, ball: np.ndarray, fps: float
             parts = np.full((n, len(names)), np.nan, dtype=np.float64)
         parts[a:b + 1] = np.column_stack([np.asarray(c[k], dtype=np.float64) for k in names])
     X = pd.concat([v1, pd.DataFrame(parts, columns=names)], axis=1)
+    if feature_set in ("full_rules", "full_i8"):
+        X = pd.concat([X, italo_columns(players, team, ball, fps, pitch, halves, list(v1.columns))], axis=1)
     rr = None
     if feature_set == "full_rules" or return_rules:
         rr = rules_mod.apply(q, fps, pitch, halves, n, rule_cfg)
@@ -338,7 +354,7 @@ def features(players: np.ndarray, team: np.ndarray, ball: np.ndarray, fps: float
     for _, a, b in halves:
         inside[a:b + 1] = True
     X.loc[~inside] = np.nan
-    X.loc[(q["n_pres"] == 0) & inside, [c for c in X.columns if not c.startswith(("b_", "r_"))]] = np.nan
+    X.loc[(q["n_pres"] == 0) & inside, [c for c in X.columns if not c.startswith(("b_", "r_", "i_"))]] = np.nan
     if feature_set not in ("full", "full_rules"):
         X = X[columns_of(feature_set, list(X.columns))]
     return (X, rr) if return_rules else X
