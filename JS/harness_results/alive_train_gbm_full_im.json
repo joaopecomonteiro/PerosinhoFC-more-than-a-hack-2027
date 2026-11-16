@@ -1,0 +1,51 @@
+{
+  "tag": "full_im",
+  "kind": "gbm",
+  "feature_set": "full",
+  "sources": [
+    "idsse",
+    "metrica"
+  ],
+  "train_games": [
+    "IDSSE-J03WN1",
+    "IDSSE-J03WOH",
+    "IDSSE-J03WOY",
+    "IDSSE-J03WPY",
+    "IDSSE-J03WR9",
+    "METRICA-1",
+    "METRICA-2"
+  ],
+  "seed": 0,
+  "table_seed": 0,
+  "code": "2b89efefbb",
+  "rows": 398620,
+  "train_s": 19.4,
+  "model": "alive_gbm_full_im.joblib",
+  "n_columns": 118,
+  "rule_cfg": {
+    "out_margin_m": 0.5,
+    "spot_still_s": 1.0,
+    "spot_line_m": 1.5,
+    "spot_corner_m": 2.0,
+    "spot_centre_m": 1.5,
+    "slow_median_ms": 2.0,
+    "hold_s": 0.6,
+    "corner_m": 2.0,
+    "corner_box": 6,
+    "gk_box_max": 3,
+    "kickoff_own_half": 0.95,
+    "kickoff_centre_m": 2.0,
+    "still_med_ms": 1.0,
+    "still_p95_ms": 3.0,
+    "still_min_s": 2.0,
+    "long_break_s": 20.0,
+    "burst_ms": 4.0,
+    "burst_n": 3,
+    "p_dead_on": 0.85,
+    "p_dead_off": 0.15,
+    "p_out": 0.97,
+    "p_kick": 0.05
+  },
+  "iters": 300,
+  "epochs": null
+}
