@@ -4,6 +4,7 @@ from __future__ import annotations
 import itertools
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from mqf.deadball import decoder, evaluate, features, model
@@ -369,3 +370,29 @@ def test_keeper_hold_after_a_save_including_while_the_ball_is_lost_in_his_hands(
     assert k["k_since_shot_s"][FPS * 7] < 5.0
     players[:, 1] = [0.5, 30.0]                                        # someone deeper than him: not the keeper rule
     assert features.keeper_v8(b, players, FPS, PITCH)["k_hold"][FPS * 7] == 0.0
+
+
+# ------------------------------------------------------------------------------------ v8 start gate
+
+def test_gate_moves_an_early_start_to_when_the_players_have_stopped():
+    dead = np.zeros(100, bool); dead[20:60] = True                     # called from frame 20 ...
+    gate = np.zeros(100, bool); gate[30:] = True                       # ... players only stopped at 30
+    out = decoder.gate_starts(dead, gate)
+    assert not out[20:30].any() and out[30:60].all()
+    never = decoder.gate_starts(dead, np.zeros(100, bool))
+    assert (never == dead).all()                                       # never gated: kept as it was ...
+    assert not decoder.gate_starts(dead, np.zeros(100, bool), drop=True).any()   # ... or dropped
+
+
+def test_start_gate_players_or_ball_out():
+    X = pd.DataFrame({"m3_open_s": [0, 0, 2.0, 0], "b_off": [0, 1, 0, 0]})
+    g = decoder.start_gate(X, np.array([0.1, 0.1, 0.1, 0.6]), 0.5)
+    assert g.tolist() == [False, True, True, True]
+
+
+def test_early_start_measure():
+    gt = _gt()                                                        # stoppages start at 600 and 1450
+    pred = gt == "D"
+    assert evaluate.score(gt, pred, FPS)["early_s"] == 0.0
+    pred[550:600] = True                                               # 2 s too early before the first one
+    assert evaluate.score(gt, pred, FPS)["early_s"] == pytest.approx(1.0)   # 2 s over 2 stoppages

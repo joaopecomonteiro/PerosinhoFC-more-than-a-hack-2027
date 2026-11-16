@@ -78,6 +78,32 @@ def viterbi(ll: np.ndarray, logp, logs) -> np.ndarray:
     return out
 
 
+def gate_starts(dead: np.ndarray, gate: np.ndarray, drop: bool = False) -> np.ndarray:
+    """João's lesson (EXPERIMENTS #43): a stoppage may only START where `gate` is True -- the players HAVE
+    stopped (looking back) or the ball has really gone out. Each predicted stoppage's start moves forward to its
+    first gated frame; with drop, a stoppage that is never gated is removed, else it is kept as it was."""
+    out = dead.copy()
+    d = np.diff(np.r_[0, dead.astype(np.int8), 0])
+    for s, e in zip(np.flatnonzero(d == 1), np.flatnonzero(d == -1)):
+        g = np.flatnonzero(gate[s:e])
+        if len(g):
+            out[s:s + g[0]] = False
+        elif drop:
+            out[s:e] = False
+    return out
+
+
+def start_gate(X, pl_back_1s: np.ndarray, threshold: float) -> np.ndarray:
+    """The gate: players-only P(dead) over the last 1 s >= threshold, or the "ball went out" memory is open
+    (CR7's real-out memory), or the ball is seen off the pitch."""
+    out = np.nan_to_num(pl_back_1s, nan=0.0) >= threshold
+    if "m3_open_s" in X:
+        out |= X["m3_open_s"].to_numpy() > 0
+    if "b_off" in X:
+        out |= X["b_off"].to_numpy() > 0
+    return out
+
+
 def decode(p_dead: np.ndarray, halves, fps: float, tables, w: float = 0.2, prior: float = 0.45,
            hz: float = HZ) -> np.ndarray:
     """(n,) bool, True where the ball is dead (inside the halves; False outside)."""

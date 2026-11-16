@@ -44,6 +44,7 @@ from . import decoder, model
 LENGTH_BUCKETS_S = (0, 5, 15, 40, np.inf)
 TOL_S = 1.0
 WEIGHTS = (0.1, 0.2, 0.4)
+GATES = (0.3, 0.5)
 
 
 
@@ -111,6 +112,13 @@ def score(gt: np.ndarray, dead: np.ndarray, fps: float) -> dict:
         t, f, m = pm.match_spells(ov, len(gs), len(ps), thr)
         f1s.append(2 * t / (2 * t + f + m) if t + f + m else 0.0)
     out["stopF1"] = float(np.mean(f1s))
+    # v8: false dead time from EARLY starts -- called dead in the 5 s before a true stoppage while still in play
+    k5 = int(round(5 * fps))
+    early = 0
+    for a, b, _ in gs:
+        lo = max(0, a - k5)
+        early += int((p[lo:a] == "D").sum() - (g[lo:a] == "D").sum()) if a > lo else 0
+    out["early_s"] = early / fps / max(1, len(gs))
     out["stops_true"], out["stops_pred"] = len(gs), len(ps)
     out["stop_s_true"] = float(np.mean([(b - a) / fps for a, b, _ in gs])) if gs else 0.0
     out["stop_s_pred"] = float(np.mean([(b - a) / fps for a, b, _ in ps])) if ps else 0.0
@@ -186,6 +194,18 @@ def by_type(stops: list, dead: np.ndarray, fps: float) -> list:
     return rows
 
 
+def joao_dead_v1(trk, spec, p_dead=None) -> np.ndarray:
+    """João's dead-ball call as the team's pipeline makes it: models/dead_v1 (players only) inside his own
+    three-state HMM (mqf.decode, dead_who=max), reading only the D frames. (His `--final` also cleans the
+    tracks and fills the ball; those change the who-evidence more than the dead call.)"""
+    from .. import dead, decode as hmm, features as feat0
+    if p_dead is None:
+        p_dead = dead.predict(dead.load_model(MODELS_DIR / "dead_v1.joblib"), trk.players, trk.team_of_slot,
+                              spec.fps, spec.pitch, spec.halves)
+    f = feat0.build(trk, spec.pitch, spec.fps, p_dead=p_dead)
+    return hmm.decode(f, spec.halves, spec.n_frames, hmm.Params(dead_who="max"), tags=None) == "D"
+
+
 def detect_all(spec, trk, models, ref):
     """{detector: dead mask} for one game; each P(dead) is computed once. models: [(tag, model, tables)]."""
     from .. import dead
@@ -195,11 +215,18 @@ def detect_all(spec, trk, models, ref):
         pr = dead.predict(ref, trk.players, trk.team_of_slot, spec.fps, spec.pitch, spec.halves)
         out["players_frame"] = np.nan_to_num(pr, nan=0.0) >= 0.5
         out["players"] = decoder.decode(pr, spec.halves, spec.fps, t0, w=0.2, prior=m0["meta"]["prior"])
+        out["joao_dead_v1"] = joao_dead_v1(trk, spec, pr)
     for i, (tag, m, tables) in enumerate(models):
-        p = model.predict(m, trk, spec)
+        p, X = model.predict(m, trk, spec, return_X=True)
         out[f"{tag}_frame"] = np.nan_to_num(p, nan=0.0) >= 0.5
         for w in WEIGHTS:
             out[f"{tag}_w{w:g}"] = decoder.decode(p, spec.halves, spec.fps, tables, w=w, prior=m["meta"]["prior"])
+        if "pl_p_back1s" in X:                        # v8: start only once the players have stopped / ball out
+            base = out[f"{tag}_w0.2"]
+            for g in GATES:
+                gate = decoder.start_gate(X, X["pl_p_back1s"].to_numpy(), g)
+                out[f"{tag}_gate{g:g}"] = decoder.gate_starts(base, gate)
+                out[f"{tag}_gate{g:g}_drop"] = decoder.gate_starts(base, gate, drop=True)
         if i == len(models) - 1:                      # extras for the newest model only
             for pr_x in (0.5, 0.55):                  # a STRICTER decision step: fewer false stoppages
                 out[f"{tag}_prior{pr_x:g}"] = decoder.decode(p, spec.halves, spec.fps, tables, w=0.2, prior=pr_x)
@@ -224,7 +251,7 @@ def combine(p_ball: np.ndarray, p_players: np.ndarray, b: float, fps: float, smo
 
 
 COLS_A = ["alive_dead_f1", "stopF1", "dead_precision", "dead_recall", "start_f1", "end_f1", "start_err_s", "end_err_s",
-          "keeper_fp"]
+          "keeper_fp", "early_s"]
 COLS_B = ["keeper_hold_s", "stops_true", "stops_pred", "stop_s_true", "stop_s_pred", "found_0-5s", "found_5-15s", "found_15-40s",
           "found_40-infs"]
 
@@ -244,7 +271,7 @@ def main(argv=None) -> int:
         m = model.load(path)
         models.append((m["meta"]["tag"], m,
                        (decoder.length_tables(m["lengths"]["alive"]), decoder.length_tables(m["lengths"]["dead"]))))
-    by_type_names = {"players", *(f"{t}_w0.2" for t, _, _ in models), f"{models[-1][0]}+pl1"}
+    by_type_names = {"players", "joao_dead_v1", *(f"{t}_w0.2" for t, _, _ in models), f"{models[-1][0]}+pl1"}
     ref = None
     if not args.no_reference:
         from .. import dead

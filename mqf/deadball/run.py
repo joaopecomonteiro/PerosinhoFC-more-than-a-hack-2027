@@ -21,33 +21,50 @@ from . import decoder, model
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--tag", default="v1")
+    ap.add_argument("--tag", default="v1", help="model tag; 'joao_v1' = João's dead_v1 in his own HMM")
     ap.add_argument("--model", default=None, help="default: models/deadball_<tag>.joblib")
     ap.add_argument("--w", type=float, default=0.2, help="decoder emission weight")
     ap.add_argument("--pl", type=float, default=0.0,
                     help="weight of João's players-only P(dead) (models/dead_v1) combined in, 0 = off (evaluate.combine)")
     ap.add_argument("--prior", type=float, default=None, help="decoder prior (default: the model's training prior)")
+    ap.add_argument("--gate", type=float, default=None,
+                    help="v8 start gate: a stoppage starts only once the players have stopped (players-only P over the "
+                         "last 1 s >= GATE) or the ball went out (decoder.start_gate)")
+    ap.add_argument("--gate-drop", action="store_true", help="with --gate: remove stoppages that are never gated")
     ap.add_argument("--out-tag", default=None, help="file name tag (default: --tag, + _pl<b> / _prior<x> when set)")
     args = ap.parse_args(argv)
     t0 = time.time()
     spec = competition_game()
     if not spec.atd_raw.exists():
         raise SystemExit(f"missing {spec.atd_raw}\nUnpack the match bundle into data/ or set MTAH_DATA_DIR.")
-    m = model.load(args.model or MODELS_DIR / f"deadball_{args.tag}.joblib")
     trk = atd.load(spec)
-    p = model.predict(m, trk, spec)
-    if args.pl:
+    if args.tag == "joao_v1":                     # João's dead_v1 in his own HMM, for comparison
+        from .evaluate import joao_dead_v1
+        dead = joao_dead_v1(trk, spec)
+        m = {"meta": {"tag": "joao dead_v1 (mqf.decode, dead_who=max)", "prior": float("nan")}}
+        prior = float("nan")
+    else:
+        m = model.load(args.model or MODELS_DIR / f"deadball_{args.tag}.joblib")
+        p, X = model.predict(m, trk, spec, return_X=True)
+    if args.tag != "joao_v1" and args.pl:
         from .. import dead as players_model
         from .evaluate import combine
         pp = players_model.predict(players_model.load_model(MODELS_DIR / "dead_v1.joblib"), trk.players, trk.team_of_slot, spec.fps,
                           spec.pitch, spec.halves)
         p = combine(p, pp, args.pl, spec.fps)
-    prior = args.prior if args.prior is not None else m["meta"]["prior"]
-    tables = decoder.length_tables(m["lengths"]["alive"]), decoder.length_tables(m["lengths"]["dead"])
-    dead = decoder.decode(p, spec.halves, spec.fps, tables, w=args.w, prior=prior)
+    if args.tag != "joao_v1":
+        prior = args.prior if args.prior is not None else m["meta"]["prior"]
+        tables = decoder.length_tables(m["lengths"]["alive"]), decoder.length_tables(m["lengths"]["dead"])
+        dead = decoder.decode(p, spec.halves, spec.fps, tables, w=args.w, prior=prior)
+        if args.gate is not None:
+            if "pl_p_back1s" not in X:
+                raise SystemExit("--gate needs a model with a players-only part (v6 or later)")
+            dead = decoder.gate_starts(dead, decoder.start_gate(X, X["pl_p_back1s"].to_numpy(), args.gate),
+                                       drop=args.gate_drop)
 
     name = args.out_tag or (args.tag + (f"_pl{args.pl:g}" if args.pl else "") +
-                            (f"_prior{args.prior:g}" if args.prior is not None else ""))
+                            (f"_prior{args.prior:g}" if args.prior is not None else "") +
+                            (f"_gate{args.gate:g}" + ("drop" if args.gate_drop else "") if args.gate is not None else ""))
     out = RESULTS_DIR / "deadball" / f"{name}.csv"
     out.parent.mkdir(parents=True, exist_ok=True)
     with open(out, "w", newline="\n") as fh:

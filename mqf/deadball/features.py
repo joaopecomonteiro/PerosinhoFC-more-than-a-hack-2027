@@ -444,6 +444,16 @@ def keeper_v8(b: np.ndarray, players: np.ndarray, fps: float, pitch) -> pd.DataF
                          "k_since_shot_s": since_shot, "k_save_hold": save_hold.astype(np.float64)})
 
 
+def back_v8(speed_mean: np.ndarray, share_slow: np.ndarray, fps: float) -> pd.DataFrame:
+    """v8 (from João's model, EXPERIMENTS #43): a stoppage should START only once the players HAVE stopped.
+    Centred windows see a stoppage coming and pull its start early; these look only BACK in time."""
+    s, sl = pd.Series(speed_mean), pd.Series(np.nan_to_num(share_slow))
+    w1, w3 = max(1, int(round(fps))), max(1, int(round(3 * fps)))
+    return pd.DataFrame({"b8_slow_back1s": sl.rolling(w1, min_periods=1).mean().to_numpy(),
+                         "b8_slow_back3s": sl.rolling(w3, min_periods=1).mean().to_numpy(),
+                         "b8_speed_back1s": s.rolling(w1, min_periods=1).mean().to_numpy()})
+
+
 def build(players, team, b, fps, pitch, halves) -> pd.DataFrame:
     """(n, F) inputs, NaN outside the halves. Older models read only the columns they were trained on."""
     P = dead.features(players, team, fps, pitch, halves)
@@ -454,7 +464,8 @@ def build(players, team, b, fps, pitch, halves) -> pd.DataFrame:
                    memory(b, players, P["share_slow"].to_numpy(), fps, pitch),
                    stopped_v6(b, players, P["speed_mean"].to_numpy(), P["share_slow"].to_numpy(), fps, pitch),
                    stopped_v7(b, P["speed_mean"].to_numpy(), P["share_slow"].to_numpy(), fps, pitch),
-                   keeper_v8(b, players, fps, pitch)],
+                   keeper_v8(b, players, fps, pitch),
+                   back_v8(P["speed_mean"].to_numpy(), P["share_slow"].to_numpy(), fps)],
                   axis=1)
     inside = np.zeros(len(X), dtype=bool)
     for _, a, z in halves:

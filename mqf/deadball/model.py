@@ -185,7 +185,7 @@ def run_lengths(gt: np.ndarray, halves, fps: float) -> dict:
     return out
 
 
-PL_COLS_EXTRA = ("pl_p", "pl_p_3s", "pl_p_10s", "pl_p_min3s", "pl_p_back2s", "pl_p_fwd2s")
+PL_COLS_EXTRA = ("pl_p", "pl_p_3s", "pl_p_10s", "pl_p_min3s", "pl_p_back2s", "pl_p_fwd2s", "pl_p_back1s")
 
 
 def _pl_rolling(pp: np.ndarray, per_s: float) -> dict:
@@ -197,7 +197,9 @@ def _pl_rolling(pp: np.ndarray, per_s: float) -> dict:
             "pl_p_min3s": s.rolling(w3, center=True, min_periods=1).min().to_numpy(),
             # v7: one-sided views, so a sudden restart is a step, not smeared over a centred window
             "pl_p_back2s": s.rolling(w2 := max(1, int(round(2 * per_s))), min_periods=1).mean().to_numpy(),
-            "pl_p_fwd2s": s[::-1].rolling(w2, min_periods=1).mean()[::-1].to_numpy()}
+            "pl_p_fwd2s": s[::-1].rolling(w2, min_periods=1).mean()[::-1].to_numpy(),
+            # v8: the start gate -- have the players stopped over the LAST second? (decoder.start_gate)
+            "pl_p_back1s": s.rolling(max(1, int(round(per_s))), min_periods=1).mean().to_numpy()}
 
 
 def dead_feature_names() -> list:
@@ -306,7 +308,7 @@ def add_players_columns(X: pd.DataFrame, m: dict, spec) -> pd.DataFrame:
     return X
 
 
-def predict(m: dict, trk, spec) -> np.ndarray:
+def predict(m: dict, trk, spec, return_X: bool = False):
     """(n,) P(dead) inside the halves, NaN outside; rounded to 1e-4 (reproducible downstream)."""
     X = features.build(trk.players, trk.team_of_slot, trk.ball, spec.fps, spec.pitch, spec.halves)
     p = np.full(len(X), np.nan)
@@ -316,7 +318,7 @@ def predict(m: dict, trk, spec) -> np.ndarray:
     add_players_columns(X, m, spec)
     if inside.any():
         p[inside] = m["model"].predict_proba(X.loc[inside, m["columns"]].to_numpy(np.float32))[:, 1]
-    return np.round(p, 4)
+    return (np.round(p, 4), X) if return_X else np.round(p, 4)
 
 
 def main(argv=None) -> int:

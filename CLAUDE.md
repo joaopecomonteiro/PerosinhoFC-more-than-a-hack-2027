@@ -68,10 +68,11 @@ python -m mqf.deadball.model train --tag v8 --drift --kept-share 0.2 --carried-s
                                                         # P(dead) on other games -> models/deadball_v8.joblib
 python -m mqf.deadball.evaluate --model models/deadball_v6.joblib models/deadball_v7.joblib \
        --conditions pff drift kept carried noisy --no-reference --tag v6_vs_v7   # other games, per type
-python -m mqf.deadball.run --tag v7 --out-tag CR7       # our match -> results/deadball/CR7.csv (D / X), aggregates
+python -m mqf.deadball.run --tag v8 --prior 0.5         # FROZEN model on our match -> results/deadball/v8_prior0.5.csv
+python -m mqf.deadball.run --tag joao_v1                # João's dead_v1 in his HMM, for comparison
 python -m mqf.viewer --deadball                         # gray where the ball is dead; lanes = results/deadball/*.csv
 python -m mqf.deadball.shift --tag v7                   # our inputs vs other games (aggregates; to reports/)
-python -m mqf.deadball.inspect --csv --all-inputs --tag v7   # TEAM'S OWN TERMINAL: public-window stoppages
+python -m mqf.deadball.inspect --csv --all-inputs --tag v8   # TEAM'S OWN TERMINAL: public-window stoppages
                                                         # (+5 s context) -> reports/deadball/*.csv, never into an AI
 ```
 - `features.py`, all built by `build()` (older models read only their own columns): João's player
@@ -87,8 +88,9 @@ python -m mqf.deadball.inspect --csv --all-inputs --tag v7   # TEAM'S OWN TERMIN
   stoppage ball rolls on, travels with a player, is passed back, is put down at the restart).
   `--stack-players`: a players-only P(dead) as input (out-of-fold by game in training; `pl_p` + 3 s /
   10 s / min / back / forward views). `add_players_columns` adds those for prediction / inspect.
-- `decoder.py` two-state semi-Markov at 5 Hz with real stoppage / play lengths, w 0.2, prior = the
-  training prior (looser priors rejected; stricter 0.5 / 0.55 in the eval, untested yet).
+- `decoder.py` two-state semi-Markov at 5 Hz with real stoppage / play lengths, w 0.2; prior 0.5 for
+  the frozen model (stricter than the training prior 0.43: fewer false stoppages, same stopF1);
+  `gate_starts` / `start_gate` (optional, rejected as default).
 - `evaluate.py` official building blocks: alive_dead_f1, **stopF1** (whole stoppages by IoU, like
   spellF1), dead precision / recall, start / restart within 1 s, found by length and **by stoppage
   type** (typed by where play restarts; "free kick" = fouls + offsides), **keeper_fp** (share of
@@ -99,26 +101,35 @@ python -m mqf.deadball.inspect --csv --all-inputs --tag v7   # TEAM'S OWN TERMIN
 - Our match: only aggregates (`run`, `shift`, the public-window summary command) and the team's
   eyes (viewer `--deadball`, `inspect --csv` read locally, reported back as patterns in words).
 
-## Models and what we know (details: EXPERIMENTS #34–41)
-| model | what changed | stopF1 pff | public 5 min (4 GT stoppages, 58.8 s dead) |
+## Models and what we know (details: EXPERIMENTS #34–43)
+**FROZEN dead-ball model: v8 with decoder prior 0.5** — `python -m mqf.deadball.run --tag v8 --prior 0.5`
+(-> `results/deadball/v8_prior0.5.csv`). Chosen on other games (tied best stopF1, fewest false stoppages);
+the public window agrees. The team's `--final` on `main` still uses João's `dead_v1`: handing v8 over is next.
+
+| model | what changed | pff stopF1 / dead precision / keeper false alarm | public 5 min (4 GT stoppages, 58.8 s dead): found / missed / false |
 |---|---|---|---|
-| João `dead_v1` (in the team's `--final`) | players only | 0.69 | — |
-| v1 / v2 | + ball; v2 gaps not aligned | 0.79 | 1 found, 44 s missed |
-| v3 / v4 | stopped state, free kick; out memory, kept ball | 0.79 | 1 found, 44 s missed |
-| v5 | carried-ball simulation | 0.796 | 37.2 s dead, 23.0 missed, 1.4 false |
-| **v6** | ball unplayed after brake, smoothed stopped, players-only stacking | **0.804** | 42.0 s dead, 18.4 missed, 1.6 false; 3 real stoppages, the last **split in two** (keeper walks with the ball) |
-| **v7 "CR7"** | real-out memory, restart-aware team_stopped, restart timing | **0.805** | 45.0 s dead, 15.4 missed, 1.6 false; 3 real stoppages, last one whole; **false stoppage on a keeper save-and-catch** |
-| v8 | CR7 + keeper holding (`keeper_v8`) | not trained yet | — |
-- Freeze candidates: **v6** and **CR7** (tie on other games; the team currently leans to v6 — a false
-  stoppage is as bad as a miss: it splits a real possession). No model catches the first public-window
-  stoppage. v8 addresses the keeper false alarm: train it, compare with v6 and CR7 incl. `keeper_fp`.
+| João `dead_v1` in his HMM (team's `--final`) | players only, 3-state HMM | 0.612 / 0.903 / 15.4% | 52.1 / 14.1 / **7.4 s**, 5 stops |
+| v1 / v2 | + ball; v2 gaps not aligned | 0.79 | 14.6 / 44.2 / 0 s, 1 stop |
+| v3 / v4 | stopped state, free kick; out memory, kept ball | 0.79 | 14.6 / 44.2 / 0 s, 1 stop |
+| v5 | carried-ball simulation | 0.796 | 37.2 / 23.0 / 1.4 s |
+| v6 | ball unplayed after brake, smoothed stopped, players-only stacking | 0.804 / 0.915 / 10.8% | 42.0 / 18.4 / 1.6 s; last stoppage **split** (keeper walks with the ball) |
+| v7 "CR7" | real-out memory, restart-aware team_stopped, restart timing | 0.805 / 0.917 / 11.0% | 45.0 / 15.4 / 1.6 s; keeper split fixed; false stoppage on a save-and-catch |
+| v8 | CR7 + keeper holding (`keeper_v8`) + look-back inputs (`back_v8`, `pl_p_back1s`) | 0.804 / 0.916 / 10.5% | 45.2 / 15.0 / 1.4 s, 3 stops |
+| **v8, prior 0.5 (frozen)** | stricter decoder | **0.804 / 0.927 / 6.4%**, early false time 0.71 → 0.58 s per stoppage | 43.4 / 16.8 / 1.4 s, 3 stops |
+- Rejected on other games: combining with the players-only P after decoding (`--pl`), looser priors,
+  the start gate (`gate_starts`: a stoppage starts only once the players have stopped — removes early
+  false time but makes starts late: start F1 0.56 → 0.47; kept in code, off by default).
+- From João's model (#42–43): it starts late but never early; where only it finds a stoppage, v6 had
+  covered it but started ~2 s early. The stricter prior is the measured fix that keeps stopF1.
+- Measures in `evaluate`: stopF1, alive_dead_f1, dead precision / recall, start / restart within 1 s,
+  per type, `keeper_fp` (keeper-holding time called dead), `early_s` (false dead time before true starts).
+- Still missed by every model: the first public-window stoppage. Weakest type: free kicks (~74% on PFF).
 - Why our match was hard: early in each half our tracker keeps the ball visible and moving through
   stoppages (fetched, carried, passed back, rolling on after the whistle); later it loses the ball for
   long stretches (150 gaps, median 10.7 s). On other games the models had no early-half weakness.
 - Rules of football we rely on: a keeper holding the ball is IN PLAY (Law 12) — every training source
   labels it alive; free kicks restart anywhere (Law 13, 9.15 m); stoppages end at a restart, not when
-  speeds drift back up.
-- Weakest type everywhere: free kicks (fouls + offsides), ~74% found on PFF.
+  speeds drift back up. False stoppages are as costly as missed ones (they split a real possession).
 
 ## How we work
 - Before a change: name the failure mode (missed stoppage, false stoppage, late start, early /
