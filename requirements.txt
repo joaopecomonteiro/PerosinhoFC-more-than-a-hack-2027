@@ -1,10 +1,7 @@
-# Everything the evaluation needs. Deliberately two lines.
-#
-# The scorer is dependency-light on purpose: no sklearn, no torch, nothing that pins a Python
-# version. It runs under 3.8 and 3.11 alike and produces identical output, so "it scored
-# differently on my machine" is not a conversation anyone has to have.
-#
-# Optional tooling -- the ATD loader and anything that opens the video -- lives in
-# requirements-starter.txt.
-numpy
-pandas
+# The submission pipeline (python -m mqf.make_submission). Pinned: same data + same pins -> the
+# byte-identical file (make reproduce). Python 3.12-3.13.
+numpy==2.5.3
+pandas==3.0.5
+scikit-learn==1.9.1   # mqf.dead (learned P(dead)); the pickled model needs this exact version
+numba==0.68.1         # mqf.fusion kernels (the numpy fallback gives the same labels, ~50x slower)
+llvmlite==0.50.0      # numba's compiler, pinned with it
