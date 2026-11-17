@@ -351,3 +351,7 @@ h1 { font-size: var(--fs-title); line-height: 24px; font-weight: 600; white-spac
 .legend .ring-team { border: 2px solid #fff; }
 .legend .ring-take { border: 2px solid var(--diff, #e5a93b); }
 .legend .ring-fill { border: 2px dashed var(--muted, #8a8a8a); }
+.legend .pline { width: 16px; height: 10px; display: inline-block; flex: none; border-radius: 3px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='10'%3E%3Cpath d='M0 8 4 7 7 3 11 2 16 2' fill='none' stroke='%23fff' stroke-width='1.5'/%3E%3C/svg%3E"),
+    linear-gradient(var(--home) 50%, var(--away) 50%); }
+.here .sub.num { font-variant-numeric: tabular-nums; }

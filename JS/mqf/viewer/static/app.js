@@ -70,9 +70,15 @@ function rle(codes) {
   for (let i = 0; i < codes.length; i++) if (codes[i] !== prev) { starts.push(i); labs.push(codes[i]); prev = codes[i]; }
   return { starts: Int32Array.from(starts), labs: Uint8Array.from(labs) };
 }
-function makeLane(name, kind, source, codes, removable) {
-  return { name, kind, source, codes, runs: rle(codes), removable: !!removable };
+function makeLane(name, kind, source, codes, removable, extra) {
+  // extra (model lanes from the server): pHome / pBnd = Uint8Array round(250 p), 255 = none;
+  // noDead = the lane has no dead-ball model (truth's D frames are not disagreements for it); note
+  const e = extra || {};
+  return { name, kind, source, codes, runs: rle(codes), removable: !!removable,
+           pHome: e.pHome || null, pBnd: e.pBnd || null, noDead: !!e.noDead, note: e.note || '' };
 }
+const P_NONE = 255;
+const pAt = (arr, f) => (arr && f >= 0 && f < arr.length && arr[f] !== P_NONE ? arr[f] / 250 : null);
 function runIndex(lane, f) {
   const st = lane.runs.starts;
   let lo = 0, hi = st.length - 1;
@@ -87,9 +93,10 @@ function computeDiff() {
   S.diff = [];
   if (S.truth < 0 || S.compare < 0) return;
   const g = S.lanes[S.truth].codes, m = S.lanes[S.compare].codes;
+  const skipDead = S.lanes[S.compare].noDead;      // no dead-ball model: the truth's D is not its error
   let cur = -1, s = 0;
   for (let f = 0; f <= S.n; f++) {
-    const key = f < S.n && g[f] !== 3 && m[f] !== g[f] ? g[f] * 4 + m[f] : -1;
+    const key = f < S.n && g[f] !== 3 && m[f] !== g[f] && !(skipDead && g[f] === 2) ? g[f] * 4 + m[f] : -1;
     if (key !== cur) {
       if (cur >= 0) S.diff.push({ s, e: f, g: cur >> 2, m: cur & 3 });
       cur = key; s = f;
@@ -130,7 +137,7 @@ async function load() {
   // every tracking version (Original = as delivered; Fixed = cleaned tracklets + filled ball)
   const sets = meta.tracking || [{ key: 'original', label: 'Original', players: 'players', ball: 'ball',
     ball_source: null, n_slots: meta.n_slots, team_of_slot: meta.team_of_slot, note: 'As delivered' }];
-  const wanted = [...meta.lanes.map((l) => l.blob)];
+  const wanted = [...meta.lanes.flatMap((l) => [l.blob, l.p_home, l.p_boundary].filter(Boolean))];
   const sizes = {};
   for (const t of sets) {
     wanted.push(t.players, t.ball); sizes[t.players] = S.n * t.n_slots * 4; sizes[t.ball] = S.n * 4;
@@ -156,9 +163,14 @@ async function load() {
   }));
   S.origBall = S.sets[0].ball;
   useSet(S.sets[0].key, false);
-  meta.lanes.forEach((l) => S.lanes.push(makeLane(l.name, l.kind, l.source, new Uint8Array(bufs[l.blob]))));
+  meta.lanes.forEach((l) => S.lanes.push(makeLane(l.name, l.kind, l.source, new Uint8Array(bufs[l.blob]), false, {
+    pHome: l.p_home ? new Uint8Array(bufs[l.p_home]) : null, pBnd: l.p_boundary ? new Uint8Array(bufs[l.p_boundary]) : null,
+    noDead: l.no_dead, note: l.note,
+  })));
   S.truth = S.lanes.findIndex((l) => l.kind === 'truth');
   S.compare = S.lanes.findIndex((l) => l.kind === 'model');
+  const preferred = meta.lanes.findIndex((l) => l.compare);     // e.g. FINAL (decoder) over the raw lane
+  if (preferred >= 0) S.compare = preferred;
 
   for (const v of meta.videos) {
     const el = $('vid-' + v.key);
@@ -603,6 +615,9 @@ function buildTimelineLabels() {
     el.className = 'tl-label lane' + (i === S.truth ? ' truth' : '') + (i === S.compare ? ' compared' : '');
     el.style.height = G.lensRow + 'px'; el.style.marginBottom = G.lensGap + 'px';
     el.title = lane.kind === 'model' ? 'Compare this lane with the ground truth' : 'Ground truth';
+    if (lane.pHome) el.title += '\nWhite line: P(home), top = ' + S.meta.home + '. Ticks on the top edge: P(possession change).';
+    if (lane.noDead) el.title += '\nNo dead-ball model: every frame of the halves is H or A; the truth\'s dead frames are not counted as disagreements.';
+    if (lane.note) el.title += '\n' + lane.note;
     const name = document.createElement('span'); name.className = 'name';
     name.append(document.createTextNode(lane.name));
     if (lane.removable) {
@@ -727,6 +742,7 @@ function drawLens() {
       ctx.fillStyle = LABEL_COL[k]; ctx.fillRect(xa, y, Math.max(1, xb - xa), G.lensRow);
       if (a > f0 && ppf * (b - a) > 3) { ctx.fillStyle = '#111'; ctx.fillRect(xa, y, 1, G.lensRow); }
     }
+    if (lane.pHome || lane.pBnd) drawLaneProbs(ctx, lane, y, f0, span, ppf, W);
     if (f0 < 0) ctx.clearRect(0, y, fx(0), G.lensRow);                 // before the recording
     if (f0 + span > S.n) ctx.clearRect(fx(S.n), y, W, G.lensRow);    // after it
   });
@@ -762,6 +778,42 @@ function drawLens() {
   const xp = Math.round(W / 2) + 0.5;
   ctx.fillStyle = '#fff'; ctx.fillRect(xp - 0.5, 0, 1, yd + G.diffRow + 4);
 }
+// P(home) as a white line inside the lane row (top = home, bottom = away), P(boundary) as ticks on its
+// top edge; one value per pixel column (the column's mean P(home), max P(boundary)).
+function drawLaneProbs(ctx, lane, y, f0, span, ppf, W) {
+  const H = G.lensRow, pad = 2, tick = 6;
+  const cols = Math.max(1, Math.floor(W));
+  const fpc = span / cols;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(0, y, W, H); ctx.clip();
+  ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(0, y + H / 2 - 0.5, W, 1);       // 0.5
+  if (lane.pBnd) {
+    for (let c = 0; c < cols; c++) {
+      const a = Math.max(0, Math.floor(f0 + c * fpc)), b = Math.min(S.n, Math.ceil(f0 + (c + 1) * fpc));
+      let mx = -1;
+      for (let f = a; f < Math.max(b, a + 1) && f < S.n; f++) { const v = lane.pBnd[f]; if (v !== P_NONE && v > mx) mx = v; }
+      if (mx < 13) continue;                                                       // < 0.05: nothing to show
+      ctx.fillStyle = `rgba(255,255,255,${(0.25 + 0.75 * (mx / 250)).toFixed(3)})`;
+      ctx.fillRect(c, y, 1, Math.max(1.5, tick * (mx / 250)));
+    }
+  }
+  if (lane.pHome) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1.25; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    let open = false;
+    for (let c = 0; c < cols; c++) {
+      const a = Math.max(0, Math.floor(f0 + c * fpc)), b = Math.min(S.n, Math.ceil(f0 + (c + 1) * fpc));
+      let sum = 0, k = 0;
+      for (let f = a; f < Math.max(b, a + 1) && f < S.n; f++) { const v = lane.pHome[f]; if (v !== P_NONE) { sum += v; k++; } }
+      if (!k) { open = false; continue; }
+      const yy = y + pad + (1 - sum / k / 250) * (H - 2 * pad);
+      if (open) ctx.lineTo(c + 0.5, yy); else { ctx.moveTo(c + 0.5, yy); open = true; }
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+const fmtP = (p) => (p === null ? '—' : p.toFixed(2));
 function diffsIn(a, b) {
   const out = [];
   let lo = 0, hi = S.diff.length;
@@ -803,7 +855,8 @@ function renderRail() {
     else {
       let t = `${k === 2 ? 'Stoppage' : 'Spell'} of ${fmtDur(b - a)}, ${fmtDur(f - a)} in`;
       if (lane.kind === 'model' && g && gk !== 3) {
-        if (k !== gk) { t = `Disagrees: truth says ${labelName(gk)}`; sub.classList.add('warn'); }
+        if (lane.noDead && gk === 2) t = 'Truth: dead ball (this lane has no dead-ball model)';
+        else if (k !== gk) { t = `Disagrees: truth says ${labelName(gk)}`; sub.classList.add('warn'); }
         else {
           const ds = a - gs, de = b - ge;
           const part = (d, w) => d === 0 ? `${w} on the frame` : `${w} ${Math.abs(d)} f ${d > 0 ? 'late' : 'early'}`;
@@ -813,6 +866,14 @@ function renderRail() {
       sub.textContent = t;
     }
     li.append(name, val, sub);
+    if (lane.pHome || lane.pBnd) {
+      const pr = document.createElement('span'); pr.className = 'sub num';
+      const parts = [];
+      if (lane.pHome) parts.push(`P(${shortTeam(S.meta.home)}) ${fmtP(pAt(lane.pHome, f))}`);
+      if (lane.pBnd) parts.push(`P(change) ${fmtP(pAt(lane.pBnd, f))}`);
+      pr.textContent = parts.join(' · ');
+      li.append(pr);
+    }
     list.appendChild(li);
   });
   if (!S.lanes.length) { const li = document.createElement('li'); li.className = 'muted'; li.textContent = 'No lanes loaded.'; list.appendChild(li); }
@@ -862,7 +923,8 @@ function renderDiffList() {
   S.diffShown = shown;
   const total = shown.reduce((a, d) => a + d.e - d.s, 0);
   const truth = S.lanes[S.truth];
-  const scope = /public/i.test(truth.source) ? ' Public window: check correctness here, do not tune on it.' : '';
+  let scope = /public/i.test(truth.source) ? ' Public window: check correctness here, do not tune on it.' : '';
+  if (S.lanes[S.compare].noDead) scope = ' Dead-ball frames of the truth left out: this lane has no dead-ball model.' + scope;
   sum.textContent = shown.length
     ? `${fmtInt(shown.length)} stretches, ${fmtDur(total)} in all, ${S.lanes[S.compare].name} against the truth.${scope}`
     : `No disagreements${S.diffMin ? ' of 1 s or more' : ''} where the truth has labels.${scope}`;
@@ -1008,7 +1070,8 @@ function drawTooltip() {
   S.lanes.forEach((lane) => {
     const k = lane.codes[f];
     const r = document.createElement('div'); r.className = 'row';
-    r.append(sw(k), document.createTextNode(`${lane.name}: ${labelName(k)}`));
+    const ph = lane.pHome ? pAt(lane.pHome, f) : null;
+    r.append(sw(k), document.createTextNode(`${lane.name}: ${labelName(k)}` + (ph !== null ? ` · P(${shortTeam(S.meta.home)}) ${fmtP(ph)}` : '')));
     tip.appendChild(r);
   });
   tip.hidden = false;
@@ -1116,6 +1179,10 @@ function buildLegend() {
   ul.textContent = '';
   for (const [c, name] of [[0, S.meta.home], [1, S.meta.away], [2, 'Dead ball'], [3, 'No label'], ['diff', 'Model disagrees with the truth']]) {
     const li = document.createElement('li'); li.append(sw(c), document.createTextNode(name)); ul.appendChild(li);
+  }
+  if (S.lanes.some((l) => l.pHome)) {               // a model lane with probabilities (Best so far)
+    const li = document.createElement('li'); const r = document.createElement('span'); r.className = 'pline';
+    li.append(r, document.createTextNode(`P(${shortTeam(S.meta.home)}), ticks P(change)`)); ul.appendChild(li);
   }
   if (S.sets.some((t) => t.flags)) {                // Fixed only: what the cleaner repaired
     for (const [cls, name] of [['ring-team', 'Fixed: team repaired'], ['ring-take', 'Fixed: keeper takeover'],

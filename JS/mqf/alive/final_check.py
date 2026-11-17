@@ -3,6 +3,9 @@
     python -m mqf.alive.final_check --jobs 3            # ~1 h on the GPU (WHO evidence of who_v1 is cached
                                                         # from the alive16 suite when it ran on this machine)
     python -m mqf.alive.final_check --quick             # 1 val game per source, bar only (smoke)
+    python -m mqf.alive.final_check --jobs 3 --whos tcn --tag fusion16 --fusion-export harness_results/fusion_preds
+                                                        # FINAL's runs only + the fusion suite's inputs
+                                                        # (mqf.fusion_export; then python run_fusion.py)
 
 Possession {who_v1, owner TCN (3 seeds + its boundary)} x dead ball {dead_v1, asf (3 seeds, mqf.alive),
 and -- when models/deadball_v8.joblib is there -- Italo's v8 (mqf.deadball): its P(dead) in our HMM, v8 with
@@ -111,7 +114,9 @@ def report(rows: list[dict], tag: str) -> str:
     for c in cols:
         g = groups[c][(groups[c].who == "who_v1") & (groups[c].method == "oracle")]
         vals.append(g.groupby("source").spellF1.mean().mean() if len(g) else float("nan"))
-    out.append("| who_v1 × true alive mask (ceiling) | " + " | ".join(f"{x:.3f}" for x in vals) + f" | {np.nanmean(vals):.3f} |")
+    if np.isfinite(vals).any():                                       # who_v1 not run (--whos tcn): no ceiling row
+        out.append("| who_v1 × true alive mask (ceiling) | " + " | ".join(f"{x:.3f}" for x in vals)
+                   + f" | {np.nanmean(vals):.3f} |")
     comps = [("**new FINAL − old FINAL**", NEW, OLD), ("possession only (tcn × dead_v1) − old", ("tcn", "dead_v1", "hmm"), OLD),
              ("alive only (who_v1 × asf) − old", ("who_v1", "asf", "hmm"), OLD),
              ("new FINAL − tcn × dead_v1 (the gains add up?)", NEW, ("tcn", "dead_v1", "hmm"))]
@@ -131,8 +136,12 @@ def report(rows: list[dict], tag: str) -> str:
     rs = {c: _paired(groups[c], NEW, OLD, "macroF1") for c in cols}
     out.append("| new FINAL − old FINAL (macroF1) | " + " | ".join(_fmt(rs[c]) for c in cols) + " | |")
     out.append("")
-    out.append("**PASS**: the new FINAL beats the old one in every column." if verdict.get("**new FINAL − old FINAL**")
-               else "**FAIL**: the new FINAL does not beat the old one in every column -- do not submit it; send this table.")
+    if "**new FINAL − old FINAL**" not in verdict:
+        out.append("Old FINAL not in this run (--whos): no old-vs-new verdict.")
+    else:
+        out.append("**PASS**: the new FINAL beats the old one in every column." if verdict["**new FINAL − old FINAL**"]
+                   else "**FAIL**: the new FINAL does not beat the old one in every column -- do not submit it; send "
+                        "this table.")
     alts = [k for k, ok in verdict.items() if k.startswith("tcn:") and k.endswith("− asf") and ok]
     out.append(("Better than asf under the new possession model, in every column: " + "; ".join(alts) + " -- "
                 "consider it for FINAL.") if alts else
@@ -149,6 +158,10 @@ def main(argv=None) -> int:
     ap.add_argument("--no-ball-fill", action="store_true")
     ap.add_argument("--no-v8", action="store_true", help="leave out Italo's mqf.deadball v8 (models/deadball_v8.joblib)")
     ap.add_argument("--tag", default="final16")
+    ap.add_argument("--whos", nargs="*", default=list(WHOS), choices=WHOS, help="possession models to run")
+    ap.add_argument("--fusion-export", default=None, metavar="DIR",
+                    help="write the fusion suite's inputs from the tcn runs (python run_fusion.py --preds DIR)")
+    ap.add_argument("--fusion-who-v1", action="store_true", help="... with who_v1's P(home) as a second stream")
     a = ap.parse_args(argv)
     from ..make_submission import FINAL, FINAL_V1
     fin, old = FINAL["options"], FINAL_V1["options"]
@@ -179,8 +192,16 @@ def main(argv=None) -> int:
         if cname in a.skip or (a.quick and cname != "bar"):
             continue
         for wname, wspec in whos.items():
+            if wname not in a.whos:
+                continue
             tag = f"{a.tag}_{cname}_{wname}"
             args = base + list(cargs) + ["--who", wspec, "--tag", tag]
+            if a.fusion_export and wname == "tcn":
+                if NEW[1] == "asf_v8" and not use_v8:
+                    raise SystemExit("--fusion-export: FINAL uses v8 but models/deadball_v8.joblib is missing")
+                args += ["--fusion-export", a.fusion_export, "--fusion-cond", cname, "--fusion-final", NEW[1]]
+                if a.fusion_who_v1:
+                    args.append("--fusion-who-v1")
             print(f"[final_check] {cname} / {wname}", flush=True)
             if experiment.main(args) != 0:
                 raise SystemExit(f"experiment failed: {cname} / {wname}")

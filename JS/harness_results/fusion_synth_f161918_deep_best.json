@@ -1,0 +1,190 @@
+{
+  "PIPELINE": {
+    "config": {
+      "alpha": 0.5672,
+      "alpha_d": 0.0,
+      "bd": -0.5552,
+      "c_ad": 17.618,
+      "c_da": 6.063,
+      "c_ha": 24.1085,
+      "cap_dead": 4.5798,
+      "cap_spell": 4.5322,
+      "dead_mix": "prob_mean",
+      "fps_scale": false,
+      "home_mix": "prob_mean",
+      "kappa": 0.0,
+      "lam_dead": 0.6656,
+      "lam_spell": 1.2338,
+      "v1_share": 0.0,
+      "v8_share": 0.2242,
+      "w_filled": 0.4412,
+      "wd": 0.5,
+      "wh": 0.9067,
+      "who_clip": 0.0184
+    },
+    "decoder": "hsmm_emp",
+    "held_out_spellF1": 0.7285184240505529
+  },
+  "final": {
+    "config": {},
+    "decoder": "final",
+    "held_out_spellF1": 0.6629957292067823
+  },
+  "hmm3_bnd": {
+    "config": {
+      "alpha": 0.7753,
+      "alpha_d": 0.3081,
+      "bd": -1.1817,
+      "c_ad": 8.8255,
+      "c_da": 24.3572,
+      "c_ha": 18.1289,
+      "dead_mix": "prob_mean",
+      "fps_scale": false,
+      "home_mix": "logit_mean",
+      "kappa": 0.25,
+      "v1_share": 0.1955,
+      "v8_share": 0.9264,
+      "w_filled": 0.4125,
+      "wd": 0.9848,
+      "wh": 0.5707,
+      "who_clip": 0.0312
+    },
+    "decoder": "hmm3_bnd",
+    "held_out_spellF1": 0.7199265313235537
+  },
+  "hmm3_bnd@0": {
+    "config": {
+      "alpha": 0.5,
+      "alpha_d": 0.0,
+      "bd": 0.0,
+      "c_ad": 10.0,
+      "c_da": 10.0,
+      "c_ha": 18.0,
+      "dead_mix": "prob_mean",
+      "fps_scale": false,
+      "home_mix": "prob_mean",
+      "kappa": 0.0,
+      "v1_share": 0.0,
+      "v8_share": 0.5,
+      "w_filled": 0.4,
+      "wd": 1.0,
+      "wh": 1.0,
+      "who_clip": 0.02
+    },
+    "decoder": "hmm3_bnd",
+    "held_out_spellF1": 0.6629957292067823
+  },
+  "hsmm_emp": {
+    "config": {
+      "alpha": 0.5672,
+      "alpha_d": 0.0,
+      "bd": -0.5552,
+      "c_ad": 17.618,
+      "c_da": 6.063,
+      "c_ha": 24.1085,
+      "cap_dead": 4.5798,
+      "cap_spell": 4.5322,
+      "dead_mix": "prob_mean",
+      "fps_scale": false,
+      "home_mix": "prob_mean",
+      "kappa": 0.0,
+      "lam_dead": 0.6656,
+      "lam_spell": 1.2338,
+      "v1_share": 0.0,
+      "v8_share": 0.2242,
+      "w_filled": 0.4412,
+      "wd": 0.5,
+      "wh": 0.9067,
+      "who_clip": 0.0184
+    },
+    "decoder": "hsmm_emp",
+    "held_out_spellF1": 0.7310354657839453
+  },
+  "hsmm_emp@0": {
+    "config": {
+      "alpha": 0.5,
+      "alpha_d": 0.0,
+      "bd": 0.0,
+      "c_ad": 10.0,
+      "c_da": 10.0,
+      "c_ha": 18.0,
+      "cap_dead": 6.0,
+      "cap_spell": 4.0,
+      "dead_mix": "prob_mean",
+      "fps_scale": false,
+      "home_mix": "prob_mean",
+      "kappa": 0.0,
+      "lam_dead": 1.0,
+      "lam_spell": 1.0,
+      "v1_share": 0.0,
+      "v8_share": 0.5,
+      "w_filled": 0.4,
+      "wd": 1.0,
+      "wh": 1.0,
+      "who_clip": 0.02
+    },
+    "decoder": "hsmm_emp",
+    "held_out_spellF1": 0.6691144648812355
+  },
+  "hsmm_soft": {
+    "config": {
+      "alpha": 0.1155,
+      "alpha_d": 0.7663,
+      "bd": -0.2505,
+      "c_ad": 21.4387,
+      "c_da": 26.1117,
+      "c_ha": 11.9186,
+      "dead_mix": "prob_mean",
+      "fps_scale": true,
+      "home_mix": "logit_mean",
+      "kappa": 0.5,
+      "lam_dead": 7.2127,
+      "lam_spell": 12.0237,
+      "m_dead": 2.3423,
+      "m_spell": 2.8517,
+      "power": 1.0,
+      "v1_share": 0.478,
+      "v8_share": 0.4166,
+      "w_filled": 0.3513,
+      "wd": 0.6214,
+      "wh": 0.8071,
+      "who_clip": 0.0287
+    },
+    "decoder": "hsmm_soft",
+    "held_out_spellF1": 0.7290524161690517
+  },
+  "hsmm_soft@0": {
+    "config": {
+      "alpha": 0.5,
+      "alpha_d": 0.0,
+      "bd": 0.0,
+      "c_ad": 10.0,
+      "c_da": 10.0,
+      "c_ha": 18.0,
+      "dead_mix": "prob_mean",
+      "fps_scale": false,
+      "home_mix": "prob_mean",
+      "kappa": 0.0,
+      "lam_dead": 8.0,
+      "lam_spell": 8.0,
+      "m_dead": 2.0,
+      "m_spell": 1.0,
+      "power": 1.0,
+      "v1_share": 0.0,
+      "v8_share": 0.5,
+      "w_filled": 0.4,
+      "wd": 1.0,
+      "wh": 1.0,
+      "who_clip": 0.02
+    },
+    "decoder": "hsmm_soft",
+    "held_out_spellF1": 0.6670543589180788
+  },
+  "prod": {
+    "config": {
+      "hook": "mqf.decode:fusion_baseline"
+    },
+    "decoder": "prod",
+    "held_out_spellF1": 0.6629957292067823
+  }
+}

@@ -139,3 +139,10 @@ def spell_stats(labels: np.ndarray, fps: int) -> dict:
     poss = [(s, e) for s, e in zip(starts, ends) if lab[s] in ("H", "A")]
     dur = np.array([e - s for s, e in poss]) / fps if poss else np.array([0.0])
     return {"possessions": len(poss), "mean_s": float(dur.mean()), "median_s": float(np.median(dur))}
+
+
+def fusion_baseline(g) -> np.ndarray:
+    """The production decoder on a fusion input dict (mqf.fusion / run_fusion.py --baseline-hook
+    mqf.decode:fusion_baseline): codes 0=H 1=A 2=D 3=X, bit for bit FINAL's labels."""
+    from .fusion_export import prod
+    return prod(g)

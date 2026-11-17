@@ -169,7 +169,7 @@ def best_lane(ts: TrackingSet | None, fps, pitch, halves, n: int, dead_mode: str
     except Exception as e:                                  # never fatal
         return None, f"best lane skipped: {type(e).__name__}: {e}"
     src = ("TCN x3 + boundary · no dead-ball model" if dead_mode == DEAD_NONE else "TCN x3 + boundary · dead_v1")
-    lane = Lane("Best so far", "model", b.codes, src, p_home=b.p_home, p_boundary=b.p_boundary,
+    lane = Lane("Old best (TCN only)", "model", b.codes, src, p_home=b.p_home, p_boundary=b.p_boundary,
                 no_dead=dead_mode == DEAD_NONE, note=b.summary)
     return lane, ""
 

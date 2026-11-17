@@ -74,9 +74,9 @@
   ],
   "seed": 0,
   "table_seed": 0,
-  "code": "2b89efefbb",
+  "code": "b098b94491",
   "rows": 3844284,
-  "train_s": 204.9,
+  "train_s": 191.8,
   "model": "alive_gbm_rules_impff.joblib",
   "n_columns": 132,
   "rule_cfg": {

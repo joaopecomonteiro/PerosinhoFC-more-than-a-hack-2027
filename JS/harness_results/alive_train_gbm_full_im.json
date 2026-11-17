@@ -17,9 +17,9 @@
   ],
   "seed": 0,
   "table_seed": 0,
-  "code": "2b89efefbb",
+  "code": "b098b94491",
   "rows": 398620,
-  "train_s": 19.4,
+  "train_s": 16.0,
   "model": "alive_gbm_full_im.joblib",
   "n_columns": 118,
   "rule_cfg": {

@@ -103,7 +103,7 @@ def test_compare_resolves_names_and_reports_missing(tmp_path, monkeypatch):
 
 def _args(**kw):
     import argparse
-    base = dict(final=False, no_tags=False, clean_tracks=False, ball_fill=False, ball_model=None, dead_model=None,
+    base = dict(final=False, final_hmm=False, no_tags=False, clean_tracks=False, ball_fill=False, ball_model=None, dead_model=None,
                 who_model=None, params=[])
     return argparse.Namespace(**{**base, **kw})
 
@@ -128,6 +128,12 @@ def test_settings_final_and_flags():
     assert opts["alive_model"] == [f"models/alive_asf_full_impff_s{k}.pt" for k in range(3)]
     assert opts["who_bnd_alpha"] == 0.5 and opts["alive_variant"] == "hmm" and opts["alive_tag_w"] == 0.0
     assert opts["deadball_model"] == Path("models/deadball_v8.joblib") and opts["deadball_decoder"] == "hmm"
+    assert opts["fusion_decoder"] == "stoppage" and opts["fusion_config"] == make_submission.STOPPAGE   # #48
+    hmm, hparams = make_submission.settings(_args(final_hmm=True))       # the 16 Nov recipe: same models, the HMM
+    assert "fusion_decoder" not in hmm and {k: v for k, v in opts.items() if not k.startswith("fusion_")} == hmm
+    assert hparams == params
+    with pytest.raises(SystemExit):
+        make_submission.settings(_args(final=True, final_hmm=True))
     with pytest.raises(SystemExit):                      # the recipe is frozen: no mixing with option flags
         make_submission.settings(_args(final=True, clean_tracks=True))
     with pytest.raises(SystemExit):

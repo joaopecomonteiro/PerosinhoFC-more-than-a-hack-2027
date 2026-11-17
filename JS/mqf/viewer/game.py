@@ -10,7 +10,9 @@ adapter function and nothing in the server or the page changes:
       tracking   players (n, slots, 2) metres + team_of_slot, ball (n, 2) metres; NaN = not tracked
                  ("Original", as delivered) and optional extra sets on the same timeline -- "Fixed" =
                  our cleaned tracklets + filled ball (fixed.py), switchable on the page
-      lanes      label tracks on the match timeline: 0 H, 1 A, 2 D, 3 no label (X / outside GT)
+      lanes      label tracks on the match timeline: 0 H, 1 A, 2 D, 3 no label (X / outside GT); a
+                 model lane may carry its P(home) and P(boundary) per frame (drawn as a line / ticks)
+                 and say it has no dead-ball model (the page then skips the truth's D frames for it)
       videos     each with its own frame count, an optional homography (normalised pitch -> pixels)
                  and, when its timeline is not the match timeline, the two frame maps
                  (video -> match, match -> video) plus a per-frame state (live, replay, ...)
@@ -41,6 +43,11 @@ class Lane:
     kind: str                  # "truth" | "model"
     codes: np.ndarray          # (n_frames,) uint8: 0 H, 1 A, 2 D, 3 no label
     source: str = ""           # shown under the lane name
+    p_home: np.ndarray | None = None       # (n_frames,) P(home), NaN = none -- drawn as a line on the lane
+    p_boundary: np.ndarray | None = None   # (n_frames,) P(H <-> A change near here), NaN = none -- ticks
+    no_dead: bool = False                  # no dead-ball model: the truth's D frames are not disagreements
+    note: str = ""                         # aggregates, shown on hover
+    compare: bool = False                  # the lane compared with the truth when the page opens
 
 
 @dataclass
@@ -234,8 +241,23 @@ def _fixed(trk, spec, fixed, log) -> list[TrackingSet]:
         return []
 
 
+def _with_best(lanes: list[Lane], extra: list[TrackingSet], spec, best: dict | None, notes: list[str], log: Log):
+    """Insert the "Best so far" lane (best.py) right after the truth, so it is the compared lane."""
+    if not best:
+        return lanes
+    from .best import best_lane
+    ts = next((t for t in extra if t.key == "fixed"), None)
+    lane, why = best_lane(ts, spec.fps, spec.pitch, spec.halves, spec.n_frames, log=log, **best)
+    if lane is None:
+        notes.append(why)
+        return lanes
+    k = sum(1 for l in lanes if l.kind == "truth")
+    return lanes[:k] + [lane] + lanes[k:]
+
+
 def competition(preds=None, gt: str | Path = "public", broadcast: bool = True, resync: bool = False,
-                log: Log = print, fixed: dict | None = None) -> ViewerGame:
+                log: Log = print, fixed: dict | None = None, best: dict | None = None,
+                fusion: dict | None = None, csv_lanes: bool = True) -> ViewerGame:
     """FC Barcelona v Athletic Club: tactical (the match timeline) + broadcast (auto-synced)."""
     from ..config import competition_game, homography_path, official
     games, _ = official()
@@ -256,9 +278,9 @@ def competition(preds=None, gt: str | Path = "public", broadcast: bool = True, r
             lanes.append(Lane("Ground truth", "truth", read_labels(gt_path, spec.n_frames), src))
         else:
             notes.append(f"No ground truth at {gt_path}. Run python bootstrap.py.")
-    pred_paths = list(preds) if preds else sorted(RESULTS_DIR.glob("*.csv"))
+    pred_paths = list(preds) if preds else (sorted(RESULTS_DIR.glob("*.csv")) if csv_lanes else [])
     lanes += lanes_from_csvs(pred_paths, spec.n_frames, "model", log)
-    if not any(l.kind == "model" for l in lanes):
+    if not any(l.kind == "model" for l in lanes) and not fusion:
         notes.append("No model output in results/. Run python -m mqf.make_submission, or drop a CSV here.")
 
     tac_paths = games.asset_paths(games.GAME, str(DATA_DIR), source="tactical")
@@ -278,14 +300,23 @@ def competition(preds=None, gt: str | Path = "public", broadcast: bool = True, r
             bv.note = b_note
         videos.append(bv)
 
+    extra = _fixed(trk, spec, fixed, log)
+    lanes = _with_best(lanes, extra, spec, best, notes, log)
+    if fusion:                                   # GT, Models no decoder, FINAL (decoder) [, fusion best] first
+        from .fusion_lanes import arrays_lanes
+        fl, why = arrays_lanes(fusion["arrays"], spec.n_frames, fusion.get("best"), log)
+        if why:
+            notes.append(why)
+        k = sum(1 for l in lanes if l.kind == "truth")
+        lanes = lanes[:k] + fl + lanes[k:]
     return ViewerGame(key=games.GAME, title=f"{home} v {away}", home=home, away=away, fps=spec.fps,
                       n_frames=spec.n_frames, pitch=spec.pitch, halves=spec.halves,
                       players=trk.players, team_of_slot=trk.team_of_slot, ball=trk.ball,
-                      lanes=lanes, videos=videos, notes=notes, extra_tracking=_fixed(trk, spec, fixed, log))
+                      lanes=lanes, videos=videos, notes=notes, extra_tracking=extra)
 
 
 def synthetic_game(preds=None, gt=None, resync: bool = False, log: Log = print,
-                   fixed: dict | None = None) -> ViewerGame:
+                   fixed: dict | None = None, best: dict | None = None) -> ViewerGame:
     """The synthetic match (full ground truth). Videos appear once `python -m mqf.viewer.demo`
     has rendered them; until then the pitch view carries everything."""
     from .. import decode, make_submission, synthetic
@@ -321,10 +352,12 @@ def synthetic_game(preds=None, gt=None, resync: bool = False, log: Log = print,
     else:
         videos.append(Video("broadcast", "Broadcast", None, spec.fps, 0,
                             note="No synthetic broadcast yet. Run python -m mqf.viewer.demo."))
+    extra = _fixed(trk, spec, fixed, log)
+    lanes = _with_best(lanes, extra, spec, best, notes, log)
     return ViewerGame(key="SYN", title=f"{home} v {away}", home=home, away=away, fps=spec.fps,
                       n_frames=spec.n_frames, pitch=spec.pitch, halves=spec.halves,
                       players=trk.players, team_of_slot=trk.team_of_slot, ball=trk.ball,
-                      lanes=lanes, videos=videos, notes=notes, extra_tracking=_fixed(trk, spec, fixed, log))
+                      lanes=lanes, videos=videos, notes=notes, extra_tracking=extra)
 
 
 # ---------------------------------------------------------------------------------- to the page
@@ -341,7 +374,15 @@ def bundle(game: ViewerGame) -> tuple[dict, dict[str, bytes]]:
     lanes = []
     for i, lane in enumerate(game.lanes):
         blobs[f"lane{i}"] = lane.codes.astype(np.uint8).tobytes()
-        lanes.append({"name": lane.name, "kind": lane.kind, "source": lane.source, "blob": f"lane{i}"})
+        entry = {"name": lane.name, "kind": lane.kind, "source": lane.source, "blob": f"lane{i}",
+                 "p_home": None, "p_boundary": None, "no_dead": bool(lane.no_dead), "note": lane.note,
+                 "compare": bool(lane.compare)}
+        for name, arr in (("p_home", lane.p_home), ("p_boundary", lane.p_boundary)):
+            if arr is not None and len(arr) == game.n_frames:
+                from .best import encode_p
+                blobs[f"{name}{i}"] = encode_p(arr)
+                entry[name] = f"{name}{i}"
+        lanes.append(entry)
     videos = []
     for v in game.videos:
         entry = {"key": v.key, "label": v.label, "available": v.available, "fps": v.fps,

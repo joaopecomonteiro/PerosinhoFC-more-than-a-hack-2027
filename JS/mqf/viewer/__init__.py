@@ -1,7 +1,7 @@
 """Match viewer: watch a game (tactical video, broadcast video or a 2D pitch) with the ground
 truth and our model's possession labels running underneath, frame by frame.
 
-    python -m mqf.viewer                          # BAR-ATH: public GT + every results/*.csv
+    python -m mqf.viewer                          # BAR-ATH: public GT, Best so far, every results/*.csv
     python -m mqf.viewer --pred results/a.csv --pred results/b.csv
     python -m mqf.viewer --synthetic              # synthetic match, full GT (no data needed)
     python -m mqf.viewer.demo                     # render synthetic videos to try every view
@@ -22,6 +22,11 @@ Modules
              A new source of games (PFF, IDSSE) is one more adapter returning a ViewerGame.
   sync.py    broadcast <-> tactical frame alignment, computed from the two tracking files.
   fixed.py   the "Fixed" tracking (cleaned tracklets + filled ball) the page can switch to (key T).
+  best.py    the "Best so far" lane: the owner TCN ensemble (+ boundary) run on Fixed, no dead-ball
+             model by default (--best-dead dead_v1 for the learned P(dead)).
+  fusion_lanes.py  the last stage: "Models, no decoder" and "FINAL (decoder)" under the ground truth, from the
+             fusion inputs -- val games with their full ground truth (--val), BAR-ATH from make_submission
+             --dump-arrays; optionally a fusion decoder lane (--fusion-best).
   server.py  localhost HTTP server: page, binary arrays, videos with Range requests.
   demo.py    synthetic broadcast feed + rendered videos, for trying the viewer without real data.
 """

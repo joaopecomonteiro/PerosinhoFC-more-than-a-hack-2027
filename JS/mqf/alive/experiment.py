@@ -348,6 +348,12 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--jobs", type=int, default=1, help="games in parallel (processes; each holds one game, ~3-4 GB)")
     ap.add_argument("--no-cache", action="store_true")
     ap.add_argument("--tag", default="alive_dev")
+    ap.add_argument("--fusion-export", default=None, metavar="DIR",
+                    help="also write the fusion suite's inputs (mqf.fusion_export) for every run")
+    ap.add_argument("--fusion-cond", default=None, help="column label for --fusion-export (default --condition)")
+    ap.add_argument("--fusion-final", default="asf_v8", help="the method FINAL uses (decoded with hmm)")
+    ap.add_argument("--fusion-no-seeds", action="store_true", help="skip the per-seed owner P(home)")
+    ap.add_argument("--fusion-who-v1", action="store_true", help="add who_v1's P(home) as a second stream")
     return ap
 
 
@@ -419,6 +425,10 @@ def _job(job):
     meta = {"game": spec.name, "source": source, "seed": seed, "condition": a.condition, "ball_mode": mode}
     r = run_game(spec, trk, gt, ball_f, filled, p_home, pb_who, P, PB, rr, a.variants, c["params"], meta,
                  a.who_bnd_alpha, a.bnd_from, c["tag_cfg"], a.variant_methods, masks)
+    if getattr(a, "fusion_export", None):
+        from .. import fusion_export
+        fusion_export.from_job(a, c, spec, source, seed, mode, trk, gt, ball_f, filled, p_home, pb_who, P, PB, r,
+                               extra)
     dt = time.time() - t0
     best = sorted(((x["spellF1"], x["method"], x["variant"]) for x in r if x["method"] != "oracle"), reverse=True)[:3]
     orc = next(x["spellF1"] for x in r if x["method"] == "oracle")

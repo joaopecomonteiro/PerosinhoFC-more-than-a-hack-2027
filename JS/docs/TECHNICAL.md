@@ -1,15 +1,15 @@
 # Més que un Frame — Technical document
 
-*Team: Perosinho FC · Members: … · More than a Hack 2027, Phase 1 · Repository: <public repo URL>*
+*Team: Perosinho FC · More than a Hack 2027, Phase 1 · engineering notes*
 
-> Upload a copy named `Perosinho_FC.md` (or export to `Perosinho_FC.pdf`). A few pages.
+> The submitted technical document is [`Perosinho_FC.md`](../Perosinho_FC.md) (a few pages). This file keeps the
+> longer engineering notes behind it; every number is in [EXPERIMENTS.md](EXPERIMENTS.md).
 
 ## 1. Approach — what we built and why
 Possession is scored as intervals (spellF1), so we treat it as segmentation: per-frame evidence
-from the tracking and Smart Tagging → a three-state (H / A / D) hidden Markov model decoded with
-Viterbi, separately in each half → whole possessions.
-<!-- Fill in: final emission model, decoder (HMM/HSMM, duration priors), alternatives rejected and
-what the validation harness showed. -->
+from the tracking and Smart Tagging → a decoder per half → whole possessions. The evidence is learned on other
+games (sections 3–4); the decoder since 17 Nov is an exact semi-Markov Viterbi with three length rules and no
+switch costs (section 3, "Decoder"). Until 16 Nov it was a three-state HMM with tuned costs (FINAL_HMM).
 
 ## 2. Assets used (and dropped)
 | asset | used? | how / why dropped |
@@ -168,7 +168,7 @@ the production decoder bit for bit. Result (#42): the ASFormer-lite ensemble +0.
 dead_v1 in every condition and ball mode; it is the dead-ball layer of `FINAL` from 16 Nov (#43).
 
 **A second dead-ball line (`mqf/deadball/`, Italo, EXPERIMENTS #44).** Developed on its own branch and ported
-into `JS/`: a gradient-boosted P(dead) on dead_v1's player inputs plus ball inputs (gaps, restart spots, off
+into this repository: a gradient-boosted P(dead) on dead_v1's player inputs plus ball inputs (gaps, restart spots, off
 the pitch, still, speed), slow-down / speed-up edges, a "went out" memory closed only by a restart, a keeper
 holding the ball in his box (in play, Law 12) and a players-only P(dead) stacked out-of-fold by game; trained
 on the same 63 training games with the ball's loss in stoppages randomised per copy (whole, partial, drifting
@@ -221,6 +221,23 @@ of the other team's nearest) carried and faded over 4 s. Ported from a team-mate
 games; thresholds from that experiment, none from BAR-ATH. They did not help: no change for the trees and,
 in the TCN ensemble, −0.002 spellF1 under the ATD noise model (#41); the submission does not use them.
 
+**Decoder (`mqf/fusion.py`, EXPERIMENTS #36, #47, #48).** The production HMM (H ↔ A cost 18 × (1 − 0.5 P(boundary)),
+10 into and out of D) was flat under a 63-setting cost sweep (#36). The fusion suite compared eight decoder families
+on FINAL's exported evidence for the 11 validation games × 6 noise columns, nested leave-one-game-out (#47). The best
+family (semi-Markov, soft duration priors) gained +0.012 but failed two columns, so it was kept out. The submitted
+decoder (`stoppage`, #48) reads the same per-frame evidence as the HMM. It has no costs and no boundary, only three
+hard length rules:
+- every possession ≥ `min_s`;
+- every dead ball ≥ `min_dead_s`;
+- a possession with a dead ball on both sides ≥ `min_between_s` (instead of `min_s`).
+
+It is solved exactly per half by a 7-state semi-Markov Viterbi. The states are dead, and for each team: between two
+dead balls / after a dead ball / after the other team or at the half's start. Start and end constraints sit on the
+first and last frame. It is tested against brute-force enumeration and numba = numpy. The lengths came from 12
+sampled + 37 grid settings on the validation games and lie on a flat plateau. The submitted round centre is
+1.4 / 3 / 1 s (`make_submission.STOPPAGE`): held out 0.650–0.652 vs the HMM's 0.654, no column beyond 2 se,
+and half the merged possessions. The first guess, 0.5 / 2 / 2 s, lost 0.019 in every column.
+
 ## 4. Training / validation data
 | dataset | source / licence | labelled by | amount | used for |
 |---|---|---|---|---|
@@ -250,10 +267,18 @@ from positions only (experimental, EXPERIMENTS #38; thresholds from football / t
   every alive run and the team of the first contact (the restart taker) owns it from the restart.
 
 ## 6. Results
-| version | harness spellF1 (IDSSE, mean ± sd) | synthetic spellF1 | notes |
-|---|---|---|---|
+Held out on the 11 validation games, mean of the six noise columns (EXPERIMENTS #35, #43, #45, #48):
+
+| version | spellF1 |
+|---|---|
+| v0: nearest team + speed-threshold stoppages, HMM (bar exact) | 0.31 |
+| FINAL_V1 (16 Nov): who_v1 × dead_v1, HMM | 0.538 |
+| owner TCN × ASFormer-lite, HMM | 0.637 |
+| FINAL_HMM: owner TCN × mean(ASFormer-lite, v8), HMM | 0.654 |
+| **FINAL (submitted): same evidence, stoppage decoder 1.4 / 3 / 1 s** | **0.650–0.652** |
 
 ## 7. Limitations and next steps
+See `Perosinho_FC.md`, section 9.
 
 ## 8. Reproduction
 ```bash
@@ -270,9 +295,9 @@ report (`results/<team>.json`, aggregates only): tracklet cleaner (`mqf/tracks.p
 machines cannot change a label) → learned P(dead): the mean of the mqf.alive ASFormer-lite ensemble
 (`models/alive_asf_full_impff_s0/1/2.pt`, #42) and the mqf.deadball v8 model (`models/deadball_v8.joblib`,
 #44; the mean wins over each alone under every ball-loss assumption, #45) → learned P(home | alive): the owner TCN
-ensemble (`models/owner_tcn_full_impff_s0/1/2.pt`, mean, its H ↔ A boundary lowering the switch cost with
-α 0.5, #40) → Smart Tagging votes → 3-state HMM, Viterbi per half, decoder `Params()` with `dead_who="max"`
-(#34–#39). The torch models run on the CPU in float64 with one thread and their outputs are rounded to 1e-4,
+ensemble (`models/owner_tcn_full_impff_s0/1/2.pt`, mean, its H ↔ A boundary, #40) → Smart Tagging votes → the
+stoppage decoder (`mqf.fusion`, 1.4 / 3 / 1 s, #48) on the emission terms of the HMM with `dead_who="max"`
+(#34–#39). `FINAL_HMM` (`--final-hmm`) is the same recipe with the 3-state HMM decoder, the submission until 16 Nov. The torch models run on the CPU in float64 with one thread and their outputs are rounded to 1e-4,
 for the same reason as the ball fill. The model files are committed in `models/`. Until 16 Nov the recipe
 was `FINAL_V1` (dead_v1 + who_v1); `python tasks.py final-harness` scores both on the validation games and
 `python tasks.py final-check` builds, validates, reproduces and compares the new file before it is submitted

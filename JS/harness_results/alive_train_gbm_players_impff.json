@@ -74,9 +74,9 @@
   ],
   "seed": 0,
   "table_seed": 0,
-  "code": "2b89efefbb",
+  "code": "b098b94491",
   "rows": 3844284,
-  "train_s": 92.9,
+  "train_s": 82.9,
   "model": "alive_gbm_players_impff.joblib",
   "n_columns": 57,
   "rule_cfg": {

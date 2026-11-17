@@ -5,6 +5,8 @@
     python tasks.py submit --team Perosinho_FC     # real match, the submitted recipe -> results/<team>.csv, validated
     python tasks.py final-harness -- --jobs 3      # old vs new FINAL on the val games (other games only)
     python tasks.py final-check --team Perosinho_FC  # real match: candidate built, validated, reproduced, compared
+    python tasks.py fusion-export                    # FINAL's val-game runs + the fusion inputs (other games)
+    python tasks.py fusion                           # the fusion / Viterbi suite on them -> verdict
     python tasks.py harness -- --noise jitter_corr_s=1.0     # args after -- go to the command
 
 Runs from anywhere (it switches to this folder). Targets marked [REAL DATA] read the match bundle:
@@ -306,6 +308,20 @@ def submit(a, extra):
 def final_harness(a, extra):
     """Old FINAL vs new FINAL on the val games (other games only; mqf.alive.final_check, e.g. -- --jobs 3)."""
     run(PY, "-m", "mqf.alive.final_check", *extra)
+
+
+@task("fusion-export")
+def fusion_export(a, extra):
+    """FINAL's runs on the val games + the fusion suite's inputs (other games only; final_check --fusion-export)."""
+    run(PY, "-m", "mqf.alive.final_check", "--whos", "tcn", "--tag", "fusion16", "--fusion-export",
+        "harness_results/fusion_preds", *(extra or ["--jobs", "3"]))
+
+
+@task("fusion")
+def fusion(a, extra):
+    """The fusion / Viterbi suite on those inputs: sanity, quick + deep pass, nested verdict (run_fusion.py)."""
+    run(PY, "run_fusion.py", "--preds", "harness_results/fusion_preds", "--final-check",
+        "harness_results/final_check_fusion16.json", *(extra or ["--jobs", "8"]))
 
 
 @task("final-check", real=True)

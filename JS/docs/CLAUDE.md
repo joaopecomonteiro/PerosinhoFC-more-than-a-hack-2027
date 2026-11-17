@@ -20,8 +20,8 @@ before bumping `OFFICIAL_COMMIT` (rules have been clarified mid-competition).
 1. **Never read, print, plot, summarise or receive the real match data or any extract** — the
    T&Cs forbid giving it to any cloud LLM, including you. Off-limits: `data/`, `cache/`,
    `results/`, `reports/`, `*.mp4`, `*_atd.*`, `*_homography.csv`, `*_smart_tagging.xml`.
-   In the fork layout (our code in `JS/`): the fork's `data/`, `JS/cache/`, `JS/results/`,
-   `JS/reports/`, and also the fork's `evaluation/results/` (baselines computed from the ATD).
+   Also `challenge/evaluation/results/` and `challenge/evaluation/gt/` (the organisers' copies; baselines computed
+   from the ATD).
    `.claude/settings.json` denies them; respect the intent too (no `head`, `np.load`, notebook
    outputs via Bash). Work from the schema, `mqf/synthetic.py` and other games. The team runs
    real-data commands and shares only aggregates (spellF1, macroF1, poss, dur, transF1,

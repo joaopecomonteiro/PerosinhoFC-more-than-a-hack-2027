@@ -1,0 +1,55 @@
+{
+  "PIPELINE": {
+    "config": {
+      "min_between_s": 1.0,
+      "min_dead_s": 3.0,
+      "min_s": 1.8
+    },
+    "decoder": "stoppage",
+    "held_out_spellF1": 0.6500003801322239
+  },
+  "final": {
+    "config": {},
+    "decoder": "final",
+    "held_out_spellF1": 0.6544284885322621
+  },
+  "minrun": {
+    "config": {
+      "min_s": 1.8
+    },
+    "decoder": "minrun",
+    "held_out_spellF1": 0.6489968902171293
+  },
+  "minrun@0": {
+    "config": {
+      "min_s": 0.5
+    },
+    "decoder": "minrun",
+    "held_out_spellF1": 0.6313572879787578
+  },
+  "prod": {
+    "config": {
+      "hook": "mqf.decode:fusion_baseline"
+    },
+    "decoder": "prod",
+    "held_out_spellF1": 0.6544284885322621
+  },
+  "stoppage": {
+    "config": {
+      "min_between_s": 1.0,
+      "min_dead_s": 3.0,
+      "min_s": 1.8
+    },
+    "decoder": "stoppage",
+    "held_out_spellF1": 0.6500003801322239
+  },
+  "stoppage@0": {
+    "config": {
+      "min_between_s": 2.0,
+      "min_dead_s": 2.0,
+      "min_s": 0.5
+    },
+    "decoder": "stoppage",
+    "held_out_spellF1": 0.6354405735801001
+  }
+}

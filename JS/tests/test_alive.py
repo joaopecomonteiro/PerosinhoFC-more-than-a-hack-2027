@@ -438,6 +438,42 @@ def test_final_check_quick(tmp_path, monkeypatch, tiny, official):
         assert "v8 + its semi-Markov decoder" in text and "mean(asf, v8)" in text and "tcn: v8 P(dead) in our HMM − asf" in text
 
 
+def test_final_check_fusion_export(tmp_path, monkeypatch, tiny, official):
+    """--whos tcn --fusion-export: one fusion input per column x val game x seed from the tcn runs; each one
+    re-decodes (production hook and fusion hmm3_bnd@0) to the labels final_check scored for FINAL."""
+    pytest.importorskip("torch")
+    from mqf import fusion, fusion_export, make_submission
+    from mqf.alive import experiment, final_check
+    from mqf.config import ROOT
+    fin0 = make_submission.FINAL["options"]
+    if not all((ROOT / m).is_file() for m in [*fin0["who_model"], fin0["deadball_model"]]):
+        pytest.skip("owner TCN / deadball v8 not in models/")
+    if "asf" not in tiny:
+        pytest.skip("torch models not trained")
+    _bundles(tmp_path, monkeypatch, {"val": ["METRICA-V1"]})
+    fin = {**make_submission.FINAL, "options": {**fin0, "alive_model": [str(tiny["asf"]), str(tiny["tcn"])]}}
+    monkeypatch.setattr(make_submission, "FINAL", fin)
+    for mod in (experiment, final_check):
+        monkeypatch.setattr(mod, "HARNESS_DIR", tmp_path)
+    monkeypatch.setattr(experiment, "EVIDENCE_CACHE", tmp_path / "ev")
+    out = tmp_path / "fp"
+    assert final_check.main(["--quick", "--no-ball-fill", "--device", "cpu", "--tag", "fx", "--whos", "tcn",
+                             "--fusion-export", str(out)]) == 0
+    text = (tmp_path / "final_check_fx.md").read_text(encoding="utf-8")
+    assert "Old FINAL not in this run" in text and "who_v1 × dead_v1" not in text
+    rows = json.loads((tmp_path / "final_check_fx.json").read_text())["rows"]
+    ref = {(f"{r['cond_label']}_{r['ball_mode']}", r["game"], str(r["seed"])): r["spellF1"] for r in rows
+           if r["who"] == "tcn" and r["method"] == "asf_v8" and r["variant"] == "hmm"}
+    files = fusion.discover(out)
+    assert sorted(f["cond"] for f in files) == ["bar_exact", "bar_fuzzy", "bar_random"]
+    for f in files:
+        g = fusion.load_npz(f["path"])
+        assert g["source"] == "metrica" and g["p_home_seeds"].shape[0] == 3 and "p_bnd_dead" in g
+        assert np.array_equal(fusion_export.prod(g), g["pred_final"])
+        assert np.array_equal(fusion.decode("hmm3_bnd", g, fusion.CENTRE), g["pred_final"])
+        assert fusion.score(g["y"], g["pred_final"])["spellF1"] == ref[(f["cond"], f["game"], f["seed"])]
+
+
 def test_decode_masked_respects_the_mask():
     m, trk, feat, pdd, rr = _feat_and_p()
     n = len(pdd)

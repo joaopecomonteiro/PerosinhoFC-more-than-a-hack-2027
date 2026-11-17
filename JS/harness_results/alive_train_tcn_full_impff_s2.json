@@ -74,9 +74,9 @@
   ],
   "seed": 2,
   "table_seed": 0,
-  "code": "2b89efefbb",
+  "code": "b098b94491",
   "rows": 3844284,
-  "train_s": 302.3,
+  "train_s": 258.4,
   "model": "alive_tcn_full_impff_s2.pt",
   "n_columns": 118,
   "rule_cfg": {

@@ -1,0 +1,65 @@
+{
+  "PIPELINE": {
+    "config": {
+      "min_between_s": 0.6136,
+      "min_dead_s": 4.5371,
+      "min_s": 1.384
+    },
+    "decoder": "stoppage",
+    "held_out_spellF1": 0.6496843170298071
+  },
+  "argmax": {
+    "config": {},
+    "decoder": "argmax",
+    "held_out_spellF1": 0.593987897693122
+  },
+  "argmax@0": {
+    "config": {},
+    "decoder": "argmax",
+    "held_out_spellF1": 0.593987897693122
+  },
+  "final": {
+    "config": {},
+    "decoder": "final",
+    "held_out_spellF1": 0.6544284885322621
+  },
+  "minrun": {
+    "config": {
+      "min_s": 1.4955
+    },
+    "decoder": "minrun",
+    "held_out_spellF1": 0.650044369287934
+  },
+  "minrun@0": {
+    "config": {
+      "min_s": 0.5
+    },
+    "decoder": "minrun",
+    "held_out_spellF1": 0.6313572879787578
+  },
+  "prod": {
+    "config": {
+      "hook": "mqf.decode:fusion_baseline"
+    },
+    "decoder": "prod",
+    "held_out_spellF1": 0.6544284885322621
+  },
+  "stoppage": {
+    "config": {
+      "min_between_s": 0.6136,
+      "min_dead_s": 4.5371,
+      "min_s": 1.384
+    },
+    "decoder": "stoppage",
+    "held_out_spellF1": 0.6519158340120074
+  },
+  "stoppage@0": {
+    "config": {
+      "min_between_s": 2.0,
+      "min_dead_s": 2.0,
+      "min_s": 0.5
+    },
+    "decoder": "stoppage",
+    "held_out_spellF1": 0.6354405735801001
+  }
+}

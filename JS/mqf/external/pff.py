@@ -4,7 +4,7 @@
     python -m mqf.external.build --source pff --matches 3831
 
 Raw files: `<gameId>.jsonl.bz2`, one JSON record per video frame (PFF FC Tracking Data Specification
-v2.2), in external_data/pff/ or JS/external/pff/ (first found; MQF_PFF_DIR overrides). 64 games,
+v2.2), in external_data/pff/ or external/pff/ (first found; MQF_PFF_DIR overrides). 64 games,
 29.97 fps, Sportlogiq BROADCAST tracking synchronised with PFF's manual event data.
 
 What is kept, as delivered:

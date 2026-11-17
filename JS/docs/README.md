@@ -1,115 +1,88 @@
-# Més que un Frame
+# Més que un Frame — Perosinho FC
 
-**Robust possession spells from uncorrected tracking.** Our entry to
+**Robust possession spells from uncorrected tracking.** Perosinho FC's entry to
 [More than a Hack 2027](https://github.com/metrica-sports/more-than-a-hack-2027), Phase 1
-(FC Barcelona × Metrica Sports × Mobile World Capital Barcelona).
+(FC Barcelona × Metrica Sports × Mobile World Capital Barcelona). The repository's name plays on Barça's
+*Més que un club*.
 
-For every frame of FC Barcelona vs Athletic Club (LaLiga 2024-25, MD2) we output `H` / `A` / `D`:
-per-frame evidence from automatic tracking and Smart Tagging, decoded into whole possessions by a
-three-state hidden Markov model per half. Approach: [TECHNICAL.md](TECHNICAL.md).
+For each of the 199,319 frames of FC Barcelona vs Athletic Club (LaLiga 2024-25, MD2) we output `H` / `A` / `D`.
+The pipeline has four stages:
 
-## Where the code lives
+1. Repair the automatic tracking: team-level tracklet cleaner, then a transformer that fills the missing ball.
+2. Estimate P(dead ball) as the mean of an ASFormer-lite ensemble and a gradient-boosting model.
+3. Estimate P(home has the ball) with a temporal CNN ensemble that has its own possession-change head, plus Smart
+   Tagging votes.
+4. Decode the possessions with an exact semi-Markov Viterbi per half, under three length rules only.
 
-This folder (`JS/`) sits inside our fork of the official repo. `mqf/config.py` detects that layout:
-the match bundle is read from the fork's `data/`, other games from the fork's `external_data/`,
-and the official code we import and score with is a **pinned** clone in `JS/vendor/mtah2027`
-(`python bootstrap.py`) — never the fork's own copies, so a merge from upstream can't change the
-scorer under us (`python bootstrap.py --status` reports drift). Everything we generate
-(`cache/`, `results/`, `reports/`, `vendor/`, `external/`, `synthetic_data/`) stays inside `JS/`
-and is gitignored by `JS/.gitignore`.
+Every choice was made on 11 games from other providers under simulated tracking noise, scored with the official
+metric. Held out, spellF1 went from 0.31 (our first HMM) to 0.65.
 
-Dependencies stay in `requirements*.txt` (the single source of pins); uv, when installed, is only
-used as a faster venv/pip — no `uv init`/`pyproject.toml`, which at the fork root would collide
-with the official files. `tasks.py` holds every command; `make <target>` (Linux/macOS/WSL) and `python tasks.py <target>`
-(Windows) are the same thing. `python tasks.py help` lists them; `[REAL DATA]` ones read the match
-bundle — run them yourself and share only the aggregates they print.
+**→ The technical document: [Perosinho_FC.md](Perosinho_FC.md)** (approach, data, rules, limitations,
+reproduction). Every experiment is logged in [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md), and the engineering notes
+are in [docs/TECHNICAL.md](docs/TECHNICAL.md).
 
 ## Reproduce the submission
 
-Needs Python 3.12–3.13, git, and the match bundle (released to registered participants; not in
-this repo, never committed).
+You need Python 3.12–3.13, git, and the match bundle. The bundle is released to registered participants; it is not
+in this repository and is never committed.
 
 ```powershell
-cd JS
 python tasks.py venv ; .venv\Scripts\Activate.ps1   # Python 3.13 venv (uv if installed, else python -m venv)
 python tasks.py setup                                # pinned deps + official repo (vendor/) + tests
-# unpack the bundle into the fork's data/  (data/tactical/..., data/broadcast/...)  or set MTAH_DATA_DIR
-python tasks.py submit --team <team_name>            # -> results/<team_name>.csv, officially validated
-python tasks.py reproduce --team <team_name>         # regenerate + byte-compare
+python tasks.py install-torch --cuda cpu            # torch + requirements-model.txt (the CPU build is enough)
+# unpack the bundle into data/  (data/tactical/..., data/broadcast/...)  or set MTAH_DATA_DIR
+python tasks.py submit --team Perosinho_FC           # -> results/Perosinho_FC.csv, officially validated
+python tasks.py reproduce --team Perosinho_FC        # regenerate into cache/reproduce/ + byte-compare
 ```
 
-The run is deterministic: same data + same code gives a byte-identical file.
+`make <target>` (Linux/macOS/WSL) is the same as `python tasks.py <target>`. `python tasks.py help` lists every
+target; the ones marked `[REAL DATA]` read the match bundle. The recipe is `FINAL` in `mqf/make_submission.py`.
+The run is deterministic: the same data and code give a byte-identical file.
 
-## Develop without the competition data
-
-```powershell
-python tasks.py test                                 # synthetic match + harness, official scorer included
-python tasks.py harness                              # validation harness on synthetic games
-# IDSSE needs its own venv: floodlight 1.2.0 requires pandas < 3, the submission pins pandas 3.0.5
-python tasks.py venv-harness ; .venv-harness\Scripts\Activate.ps1
-python tasks.py idsse-cache                          # parse external_data/idsse once, cached in external/idsse/
-python tasks.py harness-idsse                        # 7 IDSSE games (2 Bundesliga + 5 2. Bundesliga) x 3 seeds
-python tasks.py fetch-skillcorner                    # SkillCorner tracking: LFS pointers -> real files
-python tasks.py bundles                              # IDSSE / Metrica / SkillCorner -> tactical-format bundles (no noise, native fps)
-python tasks.py eval-bundles --tag v0                # pipeline on the bundles, official metric, per source
-# ball imputation (GPU machine; pip install -r requirements-model.txt, torch for your CUDA first)
-python tasks.py train-ball-all --tag v1               # A / B x player mask off / on -> models/ball_*.pt
-python tasks.py eval-ball --tag v1                   # buckets, team-nearest agreement, downstream spellF1
-```
-
-A bundle (`external/bundles/<GAME>/`) is another game in the tactical data definition: EPTS-style
-meta + raw tracking, `frame,label` ground truth, `game.json` (frames, fps, pitch, halves, label
-provenance). Nothing is added or resampled: positions, missing values, identities, frame rate and
-pitch are the source's; only the normalisation and, where a source has none, the speed field
-(centred difference of its own positions) are filled in. See `mqf/external/bundle.py`.
-
-## Watch a match with its labels
-
-```bash
-python -m mqf.viewer                                 # BAR-ATH: tactical / broadcast video or 2D pitch,
-                                                     # public GT + every results/*.csv as lanes
-python -m mqf.viewer --pred results/a.csv --pred results/b.csv
-python -m mqf.viewer.demo && python -m mqf.viewer --synthetic   # no match data needed (ffmpeg for the videos)
-python -m mqf.viewer --no-fixed                      # skip the cleaned / ball-filled tracking
-```
-
-A local page (server on 127.0.0.1) with one playhead: the video or the pitch, then the ground truth
-and each model as colour lanes (whole match + a zoomable lens), where they disagree, and what the
-tracking saw at that frame. The broadcast feed is linked to the tactical timeline algorithmically
-from the two tracking files (`mqf/viewer/sync.py`, cached in `cache/`). On BAR-ATH the ground truth
-is the public 5 minutes: use it to check correctness, never to tune. Keep screenshots of the real
-match out of AI chats.
-
-The top bar switches the tracking (key T) between **Original** (as delivered) and **Fixed** (our
-cleaned tracklets from `mqf/tracks.py` + the missing ball filled with the frozen setting of
-`mqf/ball/impute.py`), on the pitch and on the video overlay. A filled ball is a dashed ring
-(white = interpolated, amber = model), and the rail says which, with the length of the gap. With no
-stoppage detector yet, every gap in the halves is filled, stoppages included. The Fixed set is
-computed once (model on the GPU if there is one) and cached in `cache/viewer/`.
+The official code we import and score with is a **pinned** clone in `vendor/mtah2027` (`python bootstrap.py`;
+`--check-updates` lists newer organiser commits). We never use the copies in `challenge/`, so a merge from upstream
+cannot change the scorer under us. `challenge/` holds the organisers' README, rules, `games.py`, `evaluation/`
+and `starter/` as they were when we forked.
 
 ## Layout
 
 ```
-mqf/
-  config.py          paths; match constants via the official games.py
-  atd.py             FIFA/EPTS raw tracking -> arrays (cached)
-  smart_tagging.py   SportsCode XML -> soft possession evidence
-  features.py        per-frame features
-  decode.py          emission model + HMM/Viterbi per half
-  submission.py      writer + official validator/scorer
-  synthetic.py       synthetic match (real file formats, known truth)
-  make_submission.py CLI
-  harness/           validation on other games: ATD noise model, IDSSE adapter, official-metric scoring
-  external/          other games: SkillCorner LFS fetcher (converters to the tactical format next)
-  viewer/            local match viewer: video / pitch + GT and model lanes, broadcast sync,
-                     Original / Fixed tracking switch (fixed.py)
-tests/               synthetic e2e (official scorer + validator, determinism, ATD round-trip), harness, fetcher
-tasks.py  Makefile   every command (python tasks.py help)
-bootstrap.py         official repo -> vendor/mtah2027 at the pinned commit; --check-updates, --status
-docs/                CONTEXT, EXPERIMENTS, KICKOFF_PROMPT, TECHNICAL, CLAUDE
+Perosinho_FC.md     the technical document (submitted with the CSV)
+mqf/                the pipeline package
+  make_submission.py  CLI; FINAL = the submitted recipe, FINAL_HMM = same models with the HMM decoder
+  config.py           paths; match constants via the official games.py
+  atd.py  smart_tagging.py  features.py  decode.py  submission.py  synthetic.py
+  tracks.py           team-level tracklet cleaner          ball/      missing-ball imputation
+  dead.py  alive/     dead-ball models (ASFormer-lite …)   deadball/  Italo's v8 dead-ball model
+  who.py  owner/      who-has-the-ball models (owner TCN)  fusion.py  decoders (stoppage = submitted) + suite
+  harness/  external/ ATD noise model; other games -> tactical-format bundles
+  viewer/             local viewer: video / pitch + truth and model lanes
+tests/              pytest (synthetic end to end, official scorer, determinism, decoders vs brute force)
+experiments/        one-off lab scripts (who_lab.py, stoppage_grid.py)
+models/             the submitted models (+ FINAL_V1's);  models/old/  every other model we trained
+harness_results/    aggregates on other games (committed); its *.npz inputs are not
+docs/               CONTEXT, EXPERIMENTS, TECHNICAL, EXTERNAL_DATA_PLAN, KICKOFF_PROMPT
+challenge/          the organisers' files as forked
+tasks.py  Makefile  bootstrap.py  run_fusion.py  requirements*.txt  splits.json
+data/  external_data/  cache/  results/  reports/  vendor/  external/  synthetic_data/   (gitignored)
 ```
 
-External data: IDSSE — Bassek, Weber, Rein & Memmert (2025), *An integrated dataset of
-spatiotemporal and event data in elite soccer*, Scientific Data 12:195. Used for validation only.
+## Develop without the competition data
+
+```powershell
+python -m pytest -q                                  # every test; synthetic matches, official scorer included
+python tasks.py bundles                              # IDSSE / Metrica / PFF / SkillCorner -> tactical-format bundles
+python tasks.py final-harness                        # FINAL vs FINAL_V1 on the 11 validation games (other games only)
+python tasks.py fusion-export ; python tasks.py fusion   # the decoder suite on those runs (EXPERIMENTS #47-#48)
+python -m mqf.viewer --val list                      # validation games in the viewer, with their full truth
+python -m mqf.viewer.demo && python -m mqf.viewer --synthetic   # no match data needed
+```
+
+On BAR-ATH the viewer's truth lane is the public 5 minutes: use it to check correctness, never to tune. Keep
+screenshots of the real match out of AI chats.
+
+External data: IDSSE (Bassek, Weber, Rein & Memmert 2025, *Scientific Data* 12:195, CC-BY 4.0), the Metrica
+Sports sample data, PFF FC World Cup 2022 tracking (raw files not redistributed), SkillCorner open data (MIT). See
+the technical document for who labelled what.
 
 Code: MIT. The match data is licensed for the competition only and is never committed.
