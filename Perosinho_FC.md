@@ -2,7 +2,7 @@
 
 More than a Hack 2027, Phase 1 · FC Barcelona vs Athletic Club, LaLiga 2024-25 MD2 · 199,319 tactical-video frames
 labelled H / A / D.
-Team: João Soares (Sigmar), Carlos, Italo · Code: `<public repo URL>` · submitted file: `Perosinho_FC.csv`
+Team: Perosinho FC · Carlos Magalhães, Ítalo Francisco, João Soares, João Monteiro, José Leites · Code: `<public repo URL>` · submitted file: `Perosinho_FC.csv`
 (`python tasks.py submit`, byte-identical with `python tasks.py reproduce`).
 
 ## 0. In one paragraph
@@ -17,7 +17,7 @@ or choose.
 ```
  ATD (46 anonymous slots, ball missing on 41 % of graded frames)
   │  1. fix the data       tracklet cleaner (team level) ─ missing-ball imputation (transformer + interpolation)
-  │  2. dead ball          P(dead) = mean( ASFormer-lite ×3 seeds , Italo's v8 gradient boosting )
+  │  2. dead ball          P(dead) = mean( ASFormer-lite ×3 seeds , Ítalo's v8 gradient boosting )
   │  3. team possession    P(home | alive) = owner TCN ×3 seeds + its H↔A boundary ─ Smart Tagging team votes
   ▼  4. decoder            exact semi-Markov Viterbi per half, length rules only:
                            runs ≥ 1.4 s · dead balls ≥ 3 s · a possession between two dead balls ≥ 1 s
@@ -123,7 +123,7 @@ CPU in float64, with positions rounded to 1 cm, so it is reproducible.
   an ASRF-style TCN with a boundary head, and an **ASFormer-lite** (windowed self-attention). The 3-seed
   ASFormer-lite ensemble beat dead_v1 by **+0.030 to +0.049 in every column**, closing about 40 % of the gap to a
   perfect alive mask.
-* **Italo's v8** (`mqf/deadball/`, #44). Gradient boosting with ball inputs, slow-down and speed-up edges, a "went
+* **Ítalo's v8** (`mqf/deadball/`, #44). Gradient boosting with ball inputs, slow-down and speed-up edges, a "went
   out" memory that only a restart closes, a keeper holding the ball in his box (in play, Law 12), and a players-only
   P(dead) stacked out-of-fold. It comes with its own two-state semi-Markov decoder. It was trained with the ball's
   loss in stoppages randomised per copy.
@@ -132,7 +132,7 @@ CPU in float64, with positions rounded to 1 cm, so it is reproducible.
   we did not bet on it.
 
 **Tried and dropped.** Hand Law rules as a veto or a snapping step; a Smart Tagging "set piece starts dead" prior;
-Italo's inputs fed into our models (#46: small gain, failed the rule).
+Ítalo's inputs fed into our models (#46: small gain, failed the rule).
 
 ## 4. Team possession
 

@@ -320,8 +320,11 @@ def fusion_export(a, extra):
 @task("fusion")
 def fusion(a, extra):
     """The fusion / Viterbi suite on those inputs: sanity, quick + deep pass, nested verdict (run_fusion.py)."""
-    run(PY, "run_fusion.py", "--preds", "harness_results/fusion_preds", "--final-check",
-        "harness_results/final_check_fusion16.json", *(extra or ["--jobs", "8"]))
+    fc = next((p for p in ("harness_results/final_check_fusion16.json",            # a fresh fusion-export run
+                           "harness_results/5_final_check/final_check_fusion16.json") if Path(p).is_file()),
+              "harness_results/5_final_check/final_check_fusion16.json")
+    run(PY, "run_fusion.py", "--preds", "harness_results/fusion_preds", "--final-check", fc,
+        *(extra or ["--jobs", "8"]))
 
 
 @task("final-check", real=True)

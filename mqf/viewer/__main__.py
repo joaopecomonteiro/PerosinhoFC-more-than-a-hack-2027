@@ -15,7 +15,7 @@
     python -m mqf.viewer --no-best                     # skip the Best so far lane
     python -m mqf.viewer --val list                    # val games exported by final_check --fusion-export
     python -m mqf.viewer --val PFF-3822 --column atd_fuzzy --seed 0   # full GT + Models, no decoder + FINAL
-    python -m mqf.viewer --fusion-best harness_results/fusion_f162229_deep_best.json   # + the fusion pick
+    python -m mqf.viewer --fusion-best harness_results/6_decoder/fusion_f162229_deep_best.json   # + the fusion pick
 
 Three bars (fusion_lanes.py): Ground truth, "Best so far · no decoder" (per-frame argmax of FINAL's evidence)
 and "Best so far · decoder" (FINAL: the production HMM on the same arrays), from harness_results/fusion_preds
